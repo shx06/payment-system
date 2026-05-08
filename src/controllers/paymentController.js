@@ -1,4 +1,9 @@
-const { createPayment, getPaymentById, processPayment } = require('../services/paymentService');
+const {
+  createPayment,
+  getPaymentById,
+  processPayment,
+  applyPaymentCallback,
+} = require('../services/paymentService');
 
 function validateCreatePaymentPayload(payload) {
   if (!payload || typeof payload !== 'object') {
@@ -44,8 +49,17 @@ function createPaymentHandler(req, res) {
     return res.status(400).json({ success: false, error: validationError });
   }
 
-  const payment = createPayment(req.body);
-  return res.status(201).json({ success: true, data: payment });
+  const idempotencyKey = req.get('Idempotency-Key');
+  if (idempotencyKey !== undefined && !/^[A-Za-z0-9._-]{8,128}$/.test(idempotencyKey)) {
+    return res.status(400).json({ success: false, error: 'Idempotency-Key must be 8-128 chars of letters, numbers, dot, underscore, or hyphen.' });
+  }
+
+  const { payment, isIdempotentReplay } = createPayment({
+    ...req.body,
+    idempotencyKey,
+  });
+  const statusCode = isIdempotentReplay ? 200 : 201;
+  return res.status(statusCode).json({ success: true, data: payment });
 }
 
 function processPaymentHandler(req, res, next) {
@@ -57,6 +71,36 @@ function processPaymentHandler(req, res, next) {
   try {
     const payment = processPayment(req.params.paymentId, req.body);
     return res.status(200).json({ success: true, data: payment });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+function validateCallbackPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return 'Request body must be a valid JSON object.';
+  }
+
+  if (payload.status !== 'Success' && payload.status !== 'Failed') {
+    return 'status must be either Success or Failed.';
+  }
+
+  if (payload.eventId !== undefined && (typeof payload.eventId !== 'string' || payload.eventId.trim().length === 0)) {
+    return 'eventId must be a non-empty string when provided.';
+  }
+
+  return null;
+}
+
+function paymentCallbackHandler(req, res, next) {
+  const validationError = validateCallbackPayload(req.body);
+  if (validationError) {
+    return res.status(400).json({ success: false, error: validationError });
+  }
+
+  try {
+    const { payment, duplicate } = applyPaymentCallback(req.params.paymentId, req.body);
+    return res.status(200).json({ success: true, data: payment, duplicate });
   } catch (error) {
     return next(error);
   }
@@ -75,5 +119,6 @@ function getPaymentHandler(req, res) {
 module.exports = {
   createPaymentHandler,
   processPaymentHandler,
+  paymentCallbackHandler,
   getPaymentHandler,
 };
