@@ -5,7 +5,7 @@ const app = require('../src/app');
 const { clearPayments } = require('../src/store/paymentStore');
 
 async function waitForStatus(paymentId, expectedStatus) {
-  const maxAttempts = 10;
+  const maxAttempts = 20;
   const delayMs = 20;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -58,6 +58,8 @@ test('payment lifecycle transitions to success when processed', async () => {
   const finalState = await waitForStatus(created.body.data.id, 'Success');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Success');
+  assert.equal(finalState.body.data.processingAttempts, 1);
+  assert.equal(finalState.body.data.retryCount, 0);
 });
 
 test('payment lifecycle transitions to failed when processed with failure', async () => {
@@ -75,6 +77,27 @@ test('payment lifecycle transitions to failed when processed with failure', asyn
   const finalState = await waitForStatus(created.body.data.id, 'Failed');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Failed');
+  assert.equal(finalState.body.data.processingAttempts, 3);
+  assert.equal(finalState.body.data.retryCount, 2);
+});
+
+test('payment processing retries transient failures before succeeding', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const processingResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true, failuresBeforeSuccess: 2 });
+
+  assert.equal(processingResponse.statusCode, 200);
+  assert.equal(processingResponse.body.data.status, 'Processing');
+
+  const finalState = await waitForStatus(created.body.data.id, 'Success');
+  assert.equal(finalState.statusCode, 200);
+  assert.equal(finalState.body.data.status, 'Success');
+  assert.equal(finalState.body.data.processingAttempts, 3);
+  assert.equal(finalState.body.data.retryCount, 2);
 });
 
 test('GET /api/payments/:id returns payment status', async () => {
@@ -135,4 +158,21 @@ test('returns bad request for invalid json payload', async () => {
   assert.equal(response.statusCode, 400);
   assert.equal(response.body.success, false);
   assert.equal(response.body.error, 'Request body must be valid JSON.');
+});
+
+test('returns validation error for invalid failuresBeforeSuccess', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true, failuresBeforeSuccess: -1 });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(
+    response.body.error,
+    'failuresBeforeSuccess must be a non-negative integer when provided.',
+  );
 });

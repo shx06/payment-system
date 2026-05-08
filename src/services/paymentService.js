@@ -7,7 +7,9 @@ const PAYMENT_STATUSES = {
   SUCCESS: 'Success',
   FAILED: 'Failed',
 };
-const PROCESSING_COMPLETION_DELAY_MS = 50;
+const PROCESSING_COMPLETION_DELAY_MS = 20;
+const RETRY_BASE_DELAY_MS = 25;
+const MAX_RETRY_ATTEMPTS = Number(process.env.PAYMENT_MAX_RETRY_ATTEMPTS) || 3;
 
 function createPayment({ amount, currency, reference }) {
   const now = new Date().toISOString();
@@ -17,6 +19,9 @@ function createPayment({ amount, currency, reference }) {
     currency,
     reference,
     status: PAYMENT_STATUSES.PENDING,
+    processingAttempts: 0,
+    retryCount: 0,
+    lastError: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -24,7 +29,51 @@ function createPayment({ amount, currency, reference }) {
   return savePayment(payment);
 }
 
-function processPayment(id, { shouldSucceed = true } = {}) {
+function scheduleRetry(id, nextAttempt, options) {
+  const retryDelay = RETRY_BASE_DELAY_MS * (2 ** (nextAttempt - 2));
+  setTimeout(() => {
+    runProcessingAttempt(id, nextAttempt, options);
+  }, retryDelay);
+}
+
+function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBeforeSuccess = 0 } = {}) {
+  setTimeout(() => {
+    try {
+      const latestPayment = getPayment(id);
+      if (!latestPayment || latestPayment.status !== PAYMENT_STATUSES.PROCESSING) {
+        return;
+      }
+
+      latestPayment.processingAttempts += 1;
+      latestPayment.updatedAt = new Date().toISOString();
+
+      const wasSuccessful = shouldSucceed && attempt > failuresBeforeSuccess;
+
+      if (wasSuccessful) {
+        latestPayment.status = PAYMENT_STATUSES.SUCCESS;
+        latestPayment.lastError = null;
+        savePayment(latestPayment);
+        return;
+      }
+
+      latestPayment.lastError = `Gateway processing failed on attempt ${attempt}.`;
+
+      if (attempt < MAX_RETRY_ATTEMPTS) {
+        latestPayment.retryCount += 1;
+        savePayment(latestPayment);
+        scheduleRetry(id, attempt + 1, { shouldSucceed, failuresBeforeSuccess });
+        return;
+      }
+
+      latestPayment.status = PAYMENT_STATUSES.FAILED;
+      savePayment(latestPayment);
+    } catch (error) {
+      console.error(`Failed to process payment attempt ${attempt} for payment ${id}.`, error);
+    }
+  }, PROCESSING_COMPLETION_DELAY_MS);
+}
+
+function processPayment(id, { shouldSucceed = true, failuresBeforeSuccess = 0 } = {}) {
   const payment = getPayment(id);
 
   if (!payment) {
@@ -43,20 +92,7 @@ function processPayment(id, { shouldSucceed = true } = {}) {
   payment.updatedAt = new Date().toISOString();
   savePayment(payment);
 
-  setTimeout(() => {
-    try {
-      const latestPayment = getPayment(id);
-      if (!latestPayment || latestPayment.status !== PAYMENT_STATUSES.PROCESSING) {
-        return;
-      }
-
-      latestPayment.status = shouldSucceed ? PAYMENT_STATUSES.SUCCESS : PAYMENT_STATUSES.FAILED;
-      latestPayment.updatedAt = new Date().toISOString();
-      savePayment(latestPayment);
-    } catch (error) {
-      console.error(`Failed to finalize payment processing for payment ${id}.`, error);
-    }
-  }, PROCESSING_COMPLETION_DELAY_MS);
+  runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess });
 
   return payment;
 }
@@ -68,6 +104,8 @@ function getPaymentById(id) {
 module.exports = {
   PAYMENT_STATUSES,
   PROCESSING_COMPLETION_DELAY_MS,
+  RETRY_BASE_DELAY_MS,
+  MAX_RETRY_ATTEMPTS,
   createPayment,
   processPayment,
   getPaymentById,
