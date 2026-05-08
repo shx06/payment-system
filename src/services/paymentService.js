@@ -7,6 +7,7 @@ const PAYMENT_STATUSES = {
   SUCCESS: 'Success',
   FAILED: 'Failed',
 };
+const PROCESSING_COMPLETION_DELAY_MS = 50;
 
 function createPayment({ amount, currency, reference }) {
   const now = new Date().toISOString();
@@ -43,15 +44,19 @@ function processPayment(id, { shouldSucceed = true } = {}) {
   savePayment(payment);
 
   setTimeout(() => {
-    const latestPayment = getPayment(id);
-    if (!latestPayment || latestPayment.status !== PAYMENT_STATUSES.PROCESSING) {
-      return;
-    }
+    try {
+      const latestPayment = getPayment(id);
+      if (!latestPayment || latestPayment.status !== PAYMENT_STATUSES.PROCESSING) {
+        return;
+      }
 
-    latestPayment.status = shouldSucceed ? PAYMENT_STATUSES.SUCCESS : PAYMENT_STATUSES.FAILED;
-    latestPayment.updatedAt = new Date().toISOString();
-    savePayment(latestPayment);
-  }, 50);
+      latestPayment.status = shouldSucceed ? PAYMENT_STATUSES.SUCCESS : PAYMENT_STATUSES.FAILED;
+      latestPayment.updatedAt = new Date().toISOString();
+      savePayment(latestPayment);
+    } catch (error) {
+      console.error('Failed to finalize payment processing.', error);
+    }
+  }, PROCESSING_COMPLETION_DELAY_MS);
 
   return payment;
 }
@@ -62,6 +67,7 @@ function getPaymentById(id) {
 
 module.exports = {
   PAYMENT_STATUSES,
+  PROCESSING_COMPLETION_DELAY_MS,
   createPayment,
   processPayment,
   getPaymentById,

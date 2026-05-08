@@ -4,6 +4,21 @@ const request = require('supertest');
 const app = require('../src/app');
 const { clearPayments } = require('../src/store/paymentStore');
 
+async function waitForTerminalStatus(paymentId, expectedStatus) {
+  const maxAttempts = 10;
+  const delayMs = 20;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const response = await request(app).get(`/api/payments/${paymentId}`);
+    if (response.body.data.status === expectedStatus) {
+      return response;
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  throw new Error(`Timed out waiting for status ${expectedStatus}.`);
+}
+
 test.beforeEach(() => {
   clearPayments();
 });
@@ -40,8 +55,7 @@ test('payment lifecycle transitions to success when processed', async () => {
   assert.equal(processingResponse.statusCode, 200);
   assert.equal(processingResponse.body.data.status, 'Processing');
 
-  await new Promise((resolve) => setTimeout(resolve, 70));
-  const finalState = await request(app).get(`/api/payments/${created.body.data.id}`);
+  const finalState = await waitForTerminalStatus(created.body.data.id, 'Success');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Success');
 });
@@ -58,8 +72,7 @@ test('payment lifecycle transitions to failed when processed with failure', asyn
   assert.equal(processingResponse.statusCode, 200);
   assert.equal(processingResponse.body.data.status, 'Processing');
 
-  await new Promise((resolve) => setTimeout(resolve, 70));
-  const finalState = await request(app).get(`/api/payments/${created.body.data.id}`);
+  const finalState = await waitForTerminalStatus(created.body.data.id, 'Failed');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Failed');
 });
