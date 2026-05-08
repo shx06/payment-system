@@ -54,7 +54,7 @@ function processPayment(id, { shouldSucceed = true } = {}) {
       latestPayment.updatedAt = new Date().toISOString();
       savePayment(latestPayment);
     } catch (error) {
-      console.error('Failed to finalize payment processing.', error);
+      console.error(`Failed to finalize payment processing for payment ${id}.`, error);
     }
   }, PROCESSING_COMPLETION_DELAY_MS);
 
