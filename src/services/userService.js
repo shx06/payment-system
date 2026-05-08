@@ -20,7 +20,10 @@ function registerUser(payload) {
     throw error;
   }
 
-  const user = buildUser(payload);
+  const user = buildUser({
+    ...payload,
+    password: payload.password.trim(),
+  });
   saveUser(user);
   return toPublicUser(user);
 }
