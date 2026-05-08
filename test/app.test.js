@@ -115,3 +115,24 @@ test('returns conflict when processing payment again from non-pending state', as
   assert.equal(secondAttempt.statusCode, 409);
   assert.equal(secondAttempt.body.success, false);
 });
+
+test('returns not found when processing a payment that does not exist', async () => {
+  const response = await request(app)
+    .post('/api/payments/does-not-exist/process')
+    .send({ shouldSucceed: true });
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.body.success, false);
+  assert.equal(response.body.error, 'Payment not found.');
+});
+
+test('returns bad request for invalid json payload', async () => {
+  const response = await request(app)
+    .post('/api/payments')
+    .set('Content-Type', 'application/json')
+    .send('{"amount":100');
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(response.body.error, 'Request body must be valid JSON.');
+});
