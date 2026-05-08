@@ -7,10 +7,22 @@ const PAYMENT_STATUSES = {
   SUCCESS: 'Success',
   FAILED: 'Failed',
 };
-const PROCESSING_COMPLETION_DELAY_MS = 20;
-const RETRY_BASE_DELAY_MS = 25;
+const DEFAULT_PROCESSING_COMPLETION_DELAY_MS = 20;
+const DEFAULT_RETRY_BASE_DELAY_MS = 25;
+const MAX_RETRY_DELAY_MS = 2000;
 const DEFAULT_MAX_PROCESSING_ATTEMPTS = 3;
-const parsedMaxProcessingAttempts = Number.parseInt(process.env.PAYMENT_MAX_RETRY_ATTEMPTS ?? '', 10);
+const parsedProcessingCompletionDelay = Number.parseInt(process.env.PAYMENT_PROCESSING_DELAY_MS ?? '', 10);
+const parsedRetryBaseDelay = Number.parseInt(process.env.PAYMENT_RETRY_BASE_DELAY_MS ?? '', 10);
+const parsedMaxProcessingAttempts = Number.parseInt(
+  process.env.PAYMENT_MAX_PROCESSING_ATTEMPTS ?? process.env.PAYMENT_MAX_RETRY_ATTEMPTS ?? '',
+  10,
+);
+const PROCESSING_COMPLETION_DELAY_MS = Number.isInteger(parsedProcessingCompletionDelay) && parsedProcessingCompletionDelay > 0
+  ? parsedProcessingCompletionDelay
+  : DEFAULT_PROCESSING_COMPLETION_DELAY_MS;
+const RETRY_BASE_DELAY_MS = Number.isInteger(parsedRetryBaseDelay) && parsedRetryBaseDelay > 0
+  ? parsedRetryBaseDelay
+  : DEFAULT_RETRY_BASE_DELAY_MS;
 const MAX_PROCESSING_ATTEMPTS = Number.isInteger(parsedMaxProcessingAttempts) && parsedMaxProcessingAttempts > 0
   ? parsedMaxProcessingAttempts
   : DEFAULT_MAX_PROCESSING_ATTEMPTS;
@@ -34,7 +46,7 @@ function createPayment({ amount, currency, reference }) {
 }
 
 function scheduleRetry(id, nextAttempt, options) {
-  const retryDelay = RETRY_BASE_DELAY_MS * (2 ** (nextAttempt - 1));
+  const retryDelay = Math.min(RETRY_BASE_DELAY_MS * (2 ** (nextAttempt - 1)), MAX_RETRY_DELAY_MS);
   setTimeout(() => {
     runProcessingAttempt(id, nextAttempt, options);
   }, retryDelay);

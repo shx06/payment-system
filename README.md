@@ -13,7 +13,7 @@ All assignment implementation, future code changes, and pull requests are scoped
   - Process payment: `POST /api/payments/:paymentId/process` (moves to `Processing`, then asynchronously finalizes)
   - Fetch payment status: `GET /api/payments/:paymentId`
 - Failure handling + retry flow:
-  - Retries failed processing with exponential backoff (`PAYMENT_MAX_RETRY_ATTEMPTS`, default: `3`)
+  - Retries failed processing with exponential backoff (`PAYMENT_MAX_PROCESSING_ATTEMPTS`, default: `3`)
   - Tracks attempt metadata (`processingAttempts`, `retryCount`, `lastError`)
 
 ## Pending flows from assignment
