@@ -4,7 +4,7 @@ const request = require('supertest');
 const app = require('../src/app');
 const { clearPayments } = require('../src/store/paymentStore');
 
-async function waitForTerminalStatus(paymentId, expectedStatus) {
+async function waitForStatus(paymentId, expectedStatus) {
   const maxAttempts = 10;
   const delayMs = 20;
 
@@ -55,7 +55,7 @@ test('payment lifecycle transitions to success when processed', async () => {
   assert.equal(processingResponse.statusCode, 200);
   assert.equal(processingResponse.body.data.status, 'Processing');
 
-  const finalState = await waitForTerminalStatus(created.body.data.id, 'Success');
+  const finalState = await waitForStatus(created.body.data.id, 'Success');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Success');
 });
@@ -72,7 +72,7 @@ test('payment lifecycle transitions to failed when processed with failure', asyn
   assert.equal(processingResponse.statusCode, 200);
   assert.equal(processingResponse.body.data.status, 'Processing');
 
-  const finalState = await waitForTerminalStatus(created.body.data.id, 'Failed');
+  const finalState = await waitForStatus(created.body.data.id, 'Failed');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Failed');
 });
