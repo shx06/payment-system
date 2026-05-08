@@ -8,7 +8,7 @@ function saveUser(user) {
 }
 
 function getUserByEmail(email) {
-  const userId = userIdByEmail.get(email);
+  const userId = userIdByEmail.get(email.toLowerCase());
   if (!userId) {
     return null;
   }
