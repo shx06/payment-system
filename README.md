@@ -2,6 +2,8 @@
 
 Node.js + Express backend for the payment gateway assignment.
 
+All assignment implementation, future code changes, and pull requests are scoped to this repository: `shx06/payment-system`.
+
 ## Implemented in this PR
 
 - Initial backend scaffolding
