@@ -9,10 +9,11 @@ const PAYMENT_STATUSES = {
 };
 const PROCESSING_COMPLETION_DELAY_MS = 20;
 const RETRY_BASE_DELAY_MS = 25;
-const parsedMaxRetryAttempts = Number.parseInt(process.env.PAYMENT_MAX_RETRY_ATTEMPTS ?? '', 10);
-const MAX_RETRY_ATTEMPTS = Number.isInteger(parsedMaxRetryAttempts) && parsedMaxRetryAttempts > 0
-  ? parsedMaxRetryAttempts
-  : 3;
+const DEFAULT_MAX_PROCESSING_ATTEMPTS = 3;
+const parsedMaxProcessingAttempts = Number.parseInt(process.env.PAYMENT_MAX_RETRY_ATTEMPTS ?? '', 10);
+const MAX_PROCESSING_ATTEMPTS = Number.isInteger(parsedMaxProcessingAttempts) && parsedMaxProcessingAttempts > 0
+  ? parsedMaxProcessingAttempts
+  : DEFAULT_MAX_PROCESSING_ATTEMPTS;
 
 function createPayment({ amount, currency, reference }) {
   const now = new Date().toISOString();
@@ -61,7 +62,7 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
 
       latestPayment.lastError = `Gateway processing failed on attempt ${attempt}.`;
 
-      if (attempt < MAX_RETRY_ATTEMPTS) {
+      if (attempt < MAX_PROCESSING_ATTEMPTS) {
         latestPayment.retryCount += 1;
         savePayment(latestPayment);
         scheduleRetry(id, attempt + 1, { shouldSucceed, failuresBeforeSuccess });
@@ -112,7 +113,7 @@ module.exports = {
   PAYMENT_STATUSES,
   PROCESSING_COMPLETION_DELAY_MS,
   RETRY_BASE_DELAY_MS,
-  MAX_RETRY_ATTEMPTS,
+  MAX_PROCESSING_ATTEMPTS,
   createPayment,
   processPayment,
   getPaymentById,
