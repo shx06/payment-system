@@ -35,6 +35,13 @@ function validateProcessPayload(payload) {
     return 'shouldSucceed must be a boolean when provided.';
   }
 
+  if (
+    payload.failuresBeforeSuccess !== undefined
+    && (!Number.isInteger(payload.failuresBeforeSuccess) || payload.failuresBeforeSuccess < 0)
+  ) {
+    return 'failuresBeforeSuccess must be a non-negative integer when provided.';
+  }
+
   return null;
 }
 
