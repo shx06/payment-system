@@ -10,7 +10,7 @@ function normalizePassword(password) {
 
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
-  const derivedKey = scryptSync(password, salt, 64).toString('hex');
+  const derivedKey = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 }).toString('hex');
   return `${salt}:${derivedKey}`;
 }
 
