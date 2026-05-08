@@ -12,6 +12,8 @@ All assignment implementation, future code changes, and pull requests are scoped
   - Create payment: `POST /api/payments`
   - Process payment: `POST /api/payments/:paymentId/process` (moves to `Processing`, then asynchronously finalizes)
   - Fetch payment status: `GET /api/payments/:paymentId`
+- User flow:
+  - Register user: `POST /api/users/register` (email uniqueness enforced case-insensitively)
 - Failure handling + retry flow:
   - Retries failed processing with exponential backoff (`PAYMENT_MAX_PROCESSING_ATTEMPTS`, default: `3`)
   - Tracks attempt metadata (`processingAttempts`, `retryCount`, `lastError`)
@@ -47,9 +49,19 @@ All assignment implementation, future code changes, and pull requests are scoped
 }
 ```
 
+### Register user
+
+```json
+{
+  "name": "Alice Doe",
+  "email": "alice@example.com",
+  "password": "securePass123"
+}
+```
+
 ## Assumptions (for ambiguous requirements)
 
-- This implementation covers payment lifecycle plus retry/backoff handling.
+- This implementation covers payment lifecycle plus retry/backoff handling and basic user registration.
 - Storage is in-memory for now, so data resets on restart.
 - Idempotency, stronger concurrency locking, gateway randomness/timeouts, webhooks, and advanced observability are intentionally left for subsequent feature PRs.
 - Currency validation currently expects a 3-letter uppercase code format.
