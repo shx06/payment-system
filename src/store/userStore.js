@@ -3,7 +3,7 @@ const userIdByEmail = new Map();
 
 function saveUser(user) {
   usersById.set(user.id, user);
-  userIdByEmail.set(user.email, user.id);
+  userIdByEmail.set(user.email.toLowerCase(), user.id);
   return user;
 }
 
