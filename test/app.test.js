@@ -176,3 +176,20 @@ test('returns validation error for invalid failuresBeforeSuccess', async () => {
     'failuresBeforeSuccess must be a non-negative integer when provided.',
   );
 });
+
+test('returns validation error for non-integer failuresBeforeSuccess', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true, failuresBeforeSuccess: 1.5 });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(
+    response.body.error,
+    'failuresBeforeSuccess must be a non-negative integer when provided.',
+  );
+});
