@@ -55,7 +55,7 @@ function processPaymentHandler(req, res, next) {
   }
 
   try {
-    const payment = processPayment(req.params.paymentId, req.body ?? {});
+    const payment = processPayment(req.params.paymentId, req.body);
     return res.status(200).json({ success: true, data: payment });
   } catch (error) {
     return next(error);
