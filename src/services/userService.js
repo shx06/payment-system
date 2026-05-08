@@ -1,4 +1,4 @@
-const { buildUser } = require('../models/userModel');
+const { buildUser, normalizeEmail } = require('../models/userModel');
 const { getUserByEmail, saveUser } = require('../store/userStore');
 
 function toPublicUser(user) {
@@ -12,7 +12,7 @@ function toPublicUser(user) {
 }
 
 function registerUser(payload) {
-  const normalizedEmail = payload.email.trim().toLowerCase();
+  const normalizedEmail = normalizeEmail(payload.email);
   const existingUser = getUserByEmail(normalizedEmail);
   if (existingUser) {
     const error = new Error('User already exists.');
@@ -20,10 +20,7 @@ function registerUser(payload) {
     throw error;
   }
 
-  const user = buildUser({
-    ...payload,
-    password: payload.password.trim(),
-  });
+  const user = buildUser(payload);
   saveUser(user);
   return toPublicUser(user);
 }

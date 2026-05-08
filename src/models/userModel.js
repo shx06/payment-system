@@ -1,5 +1,13 @@
 const { randomUUID, randomBytes, scryptSync } = require('node:crypto');
 
+function normalizeEmail(email) {
+  return email.trim().toLowerCase();
+}
+
+function normalizePassword(password) {
+  return password.trim();
+}
+
 function hashPassword(password) {
   const salt = randomBytes(16).toString('hex');
   const derivedKey = scryptSync(password, salt, 64).toString('hex');
@@ -12,8 +20,8 @@ function buildUser({ name, email, password }) {
   return {
     id: randomUUID(),
     name: name.trim(),
-    email: email.trim().toLowerCase(),
-    passwordHash: hashPassword(password),
+    email: normalizeEmail(email),
+    passwordHash: hashPassword(normalizePassword(password)),
     createdAt: now,
     updatedAt: now,
   };
@@ -21,4 +29,5 @@ function buildUser({ name, email, password }) {
 
 module.exports = {
   buildUser,
+  normalizeEmail,
 };
