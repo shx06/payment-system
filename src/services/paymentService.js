@@ -32,19 +32,28 @@ function processPayment(id, { shouldSucceed = true } = {}) {
     throw error;
   }
 
-  if (payment.status === PAYMENT_STATUSES.SUCCESS || payment.status === PAYMENT_STATUSES.FAILED) {
-    const error = new Error('Payment is already in a terminal state.');
+  if (payment.status !== PAYMENT_STATUSES.PENDING) {
+    const error = new Error('Payment cannot be processed from its current state.');
     error.statusCode = 409;
     throw error;
   }
 
   payment.status = PAYMENT_STATUSES.PROCESSING;
   payment.updatedAt = new Date().toISOString();
+  savePayment(payment);
 
-  payment.status = shouldSucceed ? PAYMENT_STATUSES.SUCCESS : PAYMENT_STATUSES.FAILED;
-  payment.updatedAt = new Date().toISOString();
+  setTimeout(() => {
+    const latestPayment = getPayment(id);
+    if (!latestPayment || latestPayment.status !== PAYMENT_STATUSES.PROCESSING) {
+      return;
+    }
 
-  return savePayment(payment);
+    latestPayment.status = shouldSucceed ? PAYMENT_STATUSES.SUCCESS : PAYMENT_STATUSES.FAILED;
+    latestPayment.updatedAt = new Date().toISOString();
+    savePayment(latestPayment);
+  }, 50);
+
+  return payment;
 }
 
 function getPaymentById(id) {

@@ -8,7 +8,7 @@ Node.js + Express backend for the payment gateway assignment.
 - Health route: `GET /health`
 - First business flow (payment lifecycle):
   - Create payment: `POST /api/payments`
-  - Process payment: `POST /api/payments/:paymentId/process`
+  - Process payment: `POST /api/payments/:paymentId/process` (moves to `Processing`, then asynchronously finalizes)
   - Fetch payment status: `GET /api/payments/:paymentId`
 
 ## Request payloads

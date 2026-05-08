@@ -33,12 +33,17 @@ test('payment lifecycle transitions to success when processed', async () => {
     .post('/api/payments')
     .send({ amount: 100, currency: 'USD' });
 
-  const response = await request(app)
+  const processingResponse = await request(app)
     .post(`/api/payments/${created.body.data.id}/process`)
     .send({ shouldSucceed: true });
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.data.status, 'Success');
+  assert.equal(processingResponse.statusCode, 200);
+  assert.equal(processingResponse.body.data.status, 'Processing');
+
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  const finalState = await request(app).get(`/api/payments/${created.body.data.id}`);
+  assert.equal(finalState.statusCode, 200);
+  assert.equal(finalState.body.data.status, 'Success');
 });
 
 test('payment lifecycle transitions to failed when processed with failure', async () => {
@@ -46,12 +51,17 @@ test('payment lifecycle transitions to failed when processed with failure', asyn
     .post('/api/payments')
     .send({ amount: 100, currency: 'USD' });
 
-  const response = await request(app)
+  const processingResponse = await request(app)
     .post(`/api/payments/${created.body.data.id}/process`)
     .send({ shouldSucceed: false });
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.data.status, 'Failed');
+  assert.equal(processingResponse.statusCode, 200);
+  assert.equal(processingResponse.body.data.status, 'Processing');
+
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  const finalState = await request(app).get(`/api/payments/${created.body.data.id}`);
+  assert.equal(finalState.statusCode, 200);
+  assert.equal(finalState.body.data.status, 'Failed');
 });
 
 test('GET /api/payments/:id returns payment status', async () => {
@@ -74,14 +84,16 @@ test('returns validation error for invalid create payload', async () => {
   assert.equal(response.body.success, false);
 });
 
-test('returns conflict when processing terminal payment again', async () => {
+test('returns conflict when processing payment again from non-pending state', async () => {
   const created = await request(app)
     .post('/api/payments')
     .send({ amount: 10, currency: 'USD' });
 
-  await request(app)
+  const firstAttempt = await request(app)
     .post(`/api/payments/${created.body.data.id}/process`)
     .send({ shouldSucceed: true });
+  assert.equal(firstAttempt.statusCode, 200);
+  assert.equal(firstAttempt.body.data.status, 'Processing');
 
   const secondAttempt = await request(app)
     .post(`/api/payments/${created.body.data.id}/process`)
