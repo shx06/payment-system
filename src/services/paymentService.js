@@ -9,7 +9,10 @@ const PAYMENT_STATUSES = {
 };
 const PROCESSING_COMPLETION_DELAY_MS = 20;
 const RETRY_BASE_DELAY_MS = 25;
-const MAX_RETRY_ATTEMPTS = Number(process.env.PAYMENT_MAX_RETRY_ATTEMPTS) || 3;
+const parsedMaxRetryAttempts = Number.parseInt(process.env.PAYMENT_MAX_RETRY_ATTEMPTS ?? '', 10);
+const MAX_RETRY_ATTEMPTS = Number.isInteger(parsedMaxRetryAttempts) && parsedMaxRetryAttempts > 0
+  ? parsedMaxRetryAttempts
+  : 3;
 
 function createPayment({ amount, currency, reference }) {
   const now = new Date().toISOString();
@@ -30,7 +33,7 @@ function createPayment({ amount, currency, reference }) {
 }
 
 function scheduleRetry(id, nextAttempt, options) {
-  const retryDelay = RETRY_BASE_DELAY_MS * (2 ** (nextAttempt - 2));
+  const retryDelay = RETRY_BASE_DELAY_MS * (2 ** (nextAttempt - 1));
   setTimeout(() => {
     runProcessingAttempt(id, nextAttempt, options);
   }, retryDelay);
@@ -68,7 +71,11 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
       latestPayment.status = PAYMENT_STATUSES.FAILED;
       savePayment(latestPayment);
     } catch (error) {
-      console.error(`Failed to process payment attempt ${attempt} for payment ${id}.`, error);
+      console.error('Failed to process payment attempt.', {
+        paymentId: id,
+        attempt,
+        error,
+      });
     }
   }, PROCESSING_COMPLETION_DELAY_MS);
 }
