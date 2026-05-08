@@ -5,7 +5,7 @@ const app = require('../src/app');
 const { clearPayments } = require('../src/store/paymentStore');
 
 async function waitForStatus(paymentId, expectedStatus) {
-  const maxAttempts = 10;
+  const maxAttempts = 20;
   const delayMs = 20;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
@@ -43,6 +43,33 @@ test('POST /api/payments creates a payment in pending state', async () => {
   assert.equal(response.body.data.currency, 'USD');
 });
 
+test('POST /api/payments is idempotent when Idempotency-Key is reused', async () => {
+  const idempotencyKey = 'order-12345';
+  const firstResponse = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', idempotencyKey)
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1' });
+
+  const secondResponse = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', idempotencyKey)
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1' });
+
+  assert.equal(firstResponse.statusCode, 201);
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(secondResponse.body.data.id, firstResponse.body.data.id);
+});
+
+test('POST /api/payments rejects empty Idempotency-Key', async () => {
+  const response = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', '')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+});
+
 test('payment lifecycle transitions to success when processed', async () => {
   const created = await request(app)
     .post('/api/payments')
@@ -75,6 +102,7 @@ test('payment lifecycle transitions to failed when processed with failure', asyn
   const finalState = await waitForStatus(created.body.data.id, 'Failed');
   assert.equal(finalState.statusCode, 200);
   assert.equal(finalState.body.data.status, 'Failed');
+  assert.equal(finalState.body.data.processingAttempts, 3);
 });
 
 test('GET /api/payments/:id returns payment status', async () => {
@@ -114,4 +142,62 @@ test('returns conflict when processing payment again from non-pending state', as
 
   assert.equal(secondAttempt.statusCode, 409);
   assert.equal(secondAttempt.body.success, false);
+});
+
+test('callback finalizes a processing payment and duplicate callback is ignored', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 50, currency: 'USD' });
+
+  const processResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true });
+  assert.equal(processResponse.statusCode, 200);
+
+  const callbackResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success', eventId: 'evt-1' });
+
+  assert.equal(callbackResponse.statusCode, 200);
+  assert.equal(callbackResponse.body.duplicate, false);
+  assert.equal(callbackResponse.body.data.status, 'Success');
+
+  const duplicateCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success', eventId: 'evt-1' });
+
+  assert.equal(duplicateCallback.statusCode, 200);
+  assert.equal(duplicateCallback.body.duplicate, true);
+  assert.equal(duplicateCallback.body.data.status, 'Success');
+});
+
+test('callback with conflicting state is rejected for finalized payment', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 50, currency: 'USD' });
+
+  const successCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success', eventId: 'evt-2' });
+  assert.equal(successCallback.statusCode, 200);
+
+  const conflictingCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Failed', eventId: 'evt-3' });
+
+  assert.equal(conflictingCallback.statusCode, 409);
+  assert.equal(conflictingCallback.body.success, false);
+});
+
+test('callback requires eventId', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 30, currency: 'USD' });
+
+  const callback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success' });
+
+  assert.equal(callback.statusCode, 400);
+  assert.equal(callback.body.success, false);
 });
