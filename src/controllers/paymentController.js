@@ -5,6 +5,8 @@ const {
   applyPaymentCallback,
 } = require('../services/paymentService');
 
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._-]{8,128}$/;
+
 function validateCreatePaymentPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     return 'Request body must be a valid JSON object.';
@@ -50,8 +52,11 @@ function createPaymentHandler(req, res) {
   }
 
   const idempotencyKey = req.get('Idempotency-Key');
-  if (idempotencyKey !== undefined && !/^[A-Za-z0-9._-]{8,128}$/.test(idempotencyKey)) {
-    return res.status(400).json({ success: false, error: 'Idempotency-Key must be 8-128 chars of letters, numbers, dot, underscore, or hyphen.' });
+  if (idempotencyKey === '') {
+    return res.status(400).json({ success: false, error: 'Idempotency-Key cannot be empty when provided.' });
+  }
+  if (idempotencyKey !== undefined && !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+    return res.status(400).json({ success: false, error: 'Idempotency-Key must be 8-128 characters of letters, numbers, dot, underscore, or hyphen.' });
   }
 
   const { payment, isIdempotentReplay } = createPayment({
@@ -85,8 +90,8 @@ function validateCallbackPayload(payload) {
     return 'status must be either Success or Failed.';
   }
 
-  if (payload.eventId !== undefined && (typeof payload.eventId !== 'string' || payload.eventId.trim().length === 0)) {
-    return 'eventId must be a non-empty string when provided.';
+  if (typeof payload.eventId !== 'string' || payload.eventId.trim().length === 0) {
+    return 'eventId must be a non-empty string.';
   }
 
   return null;

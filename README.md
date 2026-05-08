@@ -48,6 +48,8 @@ Idempotency-Key: order-12345
 }
 ```
 
+`eventId` is required for callback deduplication.
+
 ## Assumptions (for ambiguous requirements)
 
 - Storage is in-memory for now, so data resets on restart.

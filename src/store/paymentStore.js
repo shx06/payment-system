@@ -25,7 +25,7 @@ function getPaymentByIdempotencyKey(idempotencyKey) {
 
 function recordCallbackEvent(paymentId, eventId) {
   if (!eventId) {
-    return true;
+    return false;
   }
 
   if (!callbackEventIndex.has(paymentId)) {

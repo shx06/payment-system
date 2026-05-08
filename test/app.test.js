@@ -60,6 +60,16 @@ test('POST /api/payments is idempotent when Idempotency-Key is reused', async ()
   assert.equal(secondResponse.body.data.id, firstResponse.body.data.id);
 });
 
+test('POST /api/payments rejects empty Idempotency-Key', async () => {
+  const response = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', '')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+});
+
 test('payment lifecycle transitions to success when processed', async () => {
   const created = await request(app)
     .post('/api/payments')
@@ -141,7 +151,7 @@ test('callback finalizes a processing payment and duplicate callback is ignored'
 
   const processResponse = await request(app)
     .post(`/api/payments/${created.body.data.id}/process`)
-    .send({ shouldSucceed: false });
+    .send({ shouldSucceed: true });
   assert.equal(processResponse.statusCode, 200);
 
   const callbackResponse = await request(app)
@@ -177,4 +187,17 @@ test('callback with conflicting state is rejected for finalized payment', async 
 
   assert.equal(conflictingCallback.statusCode, 409);
   assert.equal(conflictingCallback.body.success, false);
+});
+
+test('callback requires eventId', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 30, currency: 'USD' });
+
+  const callback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success' });
+
+  assert.equal(callback.statusCode, 400);
+  assert.equal(callback.body.success, false);
 });

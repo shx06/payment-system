@@ -16,7 +16,12 @@ const PROCESSING_COMPLETION_DELAY_MS = 50;
 const EXTERNAL_GATEWAY_TIMEOUT_MS = 40;
 const MAX_PROCESSING_ATTEMPTS = 3;
 const RETRY_BACKOFF_BASE_MS = 25;
+const MIN_GATEWAY_DELAY_MS = 10;
+const MAX_ADDITIONAL_GATEWAY_DELAY_MS = 10;
+const GATEWAY_TIMEOUT_PROBABILITY = 0.2;
+const GATEWAY_FAILURE_THRESHOLD = 0.6;
 const CALLBACK_FINAL_STATUSES = new Set([PAYMENT_STATUSES.SUCCESS, PAYMENT_STATUSES.FAILED]);
+const retryTimers = new Map();
 
 function createPayment({ amount, currency, reference, idempotencyKey }) {
   if (idempotencyKey) {
@@ -43,16 +48,21 @@ function createPayment({ amount, currency, reference, idempotencyKey }) {
 }
 
 function simulateExternalGateway({ shouldSucceed }) {
-  const randomValue = Math.random();
-  const outcome = typeof shouldSucceed === 'boolean'
-    ? shouldSucceed ? 'success' : 'failure'
-    : randomValue < 0.2
-      ? 'timeout'
-      : randomValue < 0.6
-        ? 'failure'
-        : 'success';
+  let outcome;
+  if (typeof shouldSucceed === 'boolean') {
+    outcome = shouldSucceed ? 'success' : 'failure';
+  } else {
+    const randomValue = Math.random();
+    if (randomValue < GATEWAY_TIMEOUT_PROBABILITY) {
+      outcome = 'timeout';
+    } else if (randomValue < GATEWAY_FAILURE_THRESHOLD) {
+      outcome = 'failure';
+    } else {
+      outcome = 'success';
+    }
+  }
 
-  const delayMs = 10 + Math.floor(Math.random() * 10);
+  const delayMs = MIN_GATEWAY_DELAY_MS + Math.floor(Math.random() * MAX_ADDITIONAL_GATEWAY_DELAY_MS);
 
   return new Promise((resolve, reject) => {
     const timeoutHandle = setTimeout(() => {
@@ -79,12 +89,26 @@ function simulateExternalGateway({ shouldSucceed }) {
 
 function scheduleRetry(id, payload, attempt) {
   const delay = RETRY_BACKOFF_BASE_MS * (2 ** (attempt - 1));
-  setTimeout(() => {
+  const timerId = setTimeout(() => {
     finalizePaymentAttempt(id, payload, attempt + 1);
   }, delay);
+  retryTimers.set(id, timerId);
+}
+
+function clearRetryTimer(id) {
+  const timerId = retryTimers.get(id);
+  if (!timerId) {
+    return;
+  }
+
+  clearTimeout(timerId);
+  retryTimers.delete(id);
 }
 
 function finalizePaymentAttempt(id, payload, attempt) {
+  // Each invocation represents one active attempt for this payment.
+  // Clear any stale timer reference from the previous scheduled retry.
+  clearRetryTimer(id);
   const payment = getPayment(id);
   if (!payment || payment.status !== PAYMENT_STATUSES.PROCESSING) {
     return;
@@ -102,6 +126,7 @@ function finalizePaymentAttempt(id, payload, attempt) {
       }
 
       if (gatewayResult.status === PAYMENT_STATUSES.SUCCESS) {
+        clearRetryTimer(id);
         latestPayment.status = PAYMENT_STATUSES.SUCCESS;
         latestPayment.updatedAt = new Date().toISOString();
         savePayment(latestPayment);
@@ -109,6 +134,7 @@ function finalizePaymentAttempt(id, payload, attempt) {
       }
 
       if (attempt >= MAX_PROCESSING_ATTEMPTS) {
+        clearRetryTimer(id);
         latestPayment.status = PAYMENT_STATUSES.FAILED;
         latestPayment.updatedAt = new Date().toISOString();
         savePayment(latestPayment);
@@ -124,6 +150,7 @@ function finalizePaymentAttempt(id, payload, attempt) {
       }
 
       if (attempt >= MAX_PROCESSING_ATTEMPTS) {
+        clearRetryTimer(id);
         latestPayment.status = PAYMENT_STATUSES.FAILED;
         latestPayment.updatedAt = new Date().toISOString();
         savePayment(latestPayment);
@@ -186,11 +213,12 @@ function applyPaymentCallback(id, { status, eventId }) {
       throw error;
     }
 
-    return { payment, duplicate: true };
+    return { payment, duplicate: false };
   }
 
   payment.status = status;
   payment.updatedAt = new Date().toISOString();
+  clearRetryTimer(id);
   savePayment(payment);
 
   return { payment, duplicate: false };
