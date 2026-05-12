@@ -1,5 +1,10 @@
 const { randomUUID } = require('node:crypto');
-const { getPayment, savePayment } = require('../store/paymentStore');
+const {
+  getPayment,
+  savePayment,
+  acquirePaymentLock,
+  releasePaymentLock,
+} = require('../store/paymentStore');
 const {
   getIdempotencyRecord,
   saveIdempotencyRecord,
@@ -130,6 +135,7 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
     try {
       const latestPayment = getPayment(id);
       if (!latestPayment || latestPayment.status !== PAYMENT_STATUSES.PROCESSING) {
+        releasePaymentLock(id);
         return;
       }
 
@@ -142,6 +148,7 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
         latestPayment.status = PAYMENT_STATUSES.SUCCESS;
         latestPayment.lastError = null;
         savePayment(latestPayment);
+        releasePaymentLock(id);
         return;
       }
 
@@ -156,7 +163,9 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
 
       latestPayment.status = PAYMENT_STATUSES.FAILED;
       savePayment(latestPayment);
+      releasePaymentLock(id);
     } catch (error) {
+      releasePaymentLock(id);
       console.error('Failed to process payment attempt.', {
         paymentId: id,
         attempt,
@@ -176,28 +185,37 @@ function processPayment(
     return { payment: existingPayment, replayed: true };
   }
 
-  const payment = getPayment(id);
-
-  if (!payment) {
-    const error = new Error('Payment not found.');
-    error.statusCode = 404;
-    throw error;
+  if (!acquirePaymentLock(id)) {
+    throw createConflictError('Payment is already being processed by another request.');
   }
 
-  if (payment.status !== PAYMENT_STATUSES.PENDING) {
-    const error = new Error('Payment cannot be processed from its current state.');
-    error.statusCode = 409;
+  try {
+    const payment = getPayment(id);
+
+    if (!payment) {
+      const error = new Error('Payment not found.');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (payment.status !== PAYMENT_STATUSES.PENDING) {
+      const error = new Error('Payment cannot be processed from its current state.');
+      error.statusCode = 409;
+      throw error;
+    }
+
+    payment.status = PAYMENT_STATUSES.PROCESSING;
+    payment.updatedAt = new Date().toISOString();
+    savePayment(payment);
+    storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
+
+    runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess });
+
+    return { payment, replayed: false };
+  } catch (error) {
+    releasePaymentLock(id);
     throw error;
   }
-
-  payment.status = PAYMENT_STATUSES.PROCESSING;
-  payment.updatedAt = new Date().toISOString();
-  savePayment(payment);
-  storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
-
-  runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess });
-
-  return { payment, replayed: false };
 }
 
 function getPaymentById(id) {

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 const app = require('../src/app');
-const { clearPayments } = require('../src/store/paymentStore');
+const { clearPayments, clearPaymentLocks } = require('../src/store/paymentStore');
 const { clearIdempotencyRecords } = require('../src/store/idempotencyStore');
 
 async function waitForStatus(paymentId, expectedStatus) {
@@ -22,6 +22,7 @@ async function waitForStatus(paymentId, expectedStatus) {
 
 test.beforeEach(() => {
   clearPayments();
+  clearPaymentLocks();
   clearIdempotencyRecords();
 });
 
@@ -133,12 +134,34 @@ test('returns conflict when processing payment again from non-pending state', as
   assert.equal(firstAttempt.statusCode, 200);
   assert.equal(firstAttempt.body.data.status, 'Processing');
 
+  await waitForStatus(created.body.data.id, 'Success');
+
   const secondAttempt = await request(app)
     .post(`/api/payments/${created.body.data.id}/process`)
     .send({ shouldSucceed: false });
 
   assert.equal(secondAttempt.statusCode, 409);
   assert.equal(secondAttempt.body.success, false);
+  assert.equal(secondAttempt.body.error, 'Payment cannot be processed from its current state.');
+});
+
+test('returns conflict when processing is already in progress', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 15, currency: 'USD' });
+
+  const firstAttempt = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true });
+  assert.equal(firstAttempt.statusCode, 200);
+
+  const secondAttempt = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true });
+
+  assert.equal(secondAttempt.statusCode, 409);
+  assert.equal(secondAttempt.body.success, false);
+  assert.equal(secondAttempt.body.error, 'Payment is already being processed by another request.');
 });
 
 test('returns not found when processing a payment that does not exist', async () => {
