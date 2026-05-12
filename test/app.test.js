@@ -4,6 +4,7 @@ const request = require('supertest');
 const app = require('../src/app');
 const { clearPayments, clearPaymentLocks } = require('../src/store/paymentStore');
 const { clearIdempotencyRecords } = require('../src/store/idempotencyStore');
+const { setRandomGenerator, resetRandomGenerator } = require('../src/services/paymentService');
 
 async function waitForStatus(paymentId, expectedStatus) {
   const maxAttempts = 20;
@@ -24,6 +25,7 @@ test.beforeEach(() => {
   clearPayments();
   clearPaymentLocks();
   clearIdempotencyRecords();
+  resetRandomGenerator();
 });
 
 test('GET /health returns service health', async () => {
@@ -335,15 +337,14 @@ test('simulated gateway mode retries after timeout and succeeds on second attemp
     .post('/api/payments')
     .send({ amount: 120, currency: 'USD' });
 
-  const originalRandom = Math.random;
   const timeoutOutcomeRoll = 0.1;
   const minDelayRoll = 0;
   const successOutcomeRoll = 0.95;
   const fallbackSuccessOutcomeRoll = successOutcomeRoll;
   const randomSequence = [timeoutOutcomeRoll, minDelayRoll, successOutcomeRoll, minDelayRoll];
-  Math.random = () => randomSequence.shift() ?? fallbackSuccessOutcomeRoll;
+  setRandomGenerator(() => randomSequence.shift() ?? fallbackSuccessOutcomeRoll);
   t.after(() => {
-    Math.random = originalRandom;
+    resetRandomGenerator();
   });
 
   const processingResponse = await request(app)

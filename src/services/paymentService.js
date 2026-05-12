@@ -43,6 +43,7 @@ const RETRY_BASE_DELAY_MS = Number.isInteger(parsedRetryBaseDelay) && parsedRetr
 const MAX_PROCESSING_ATTEMPTS = Number.isInteger(parsedMaxProcessingAttempts) && parsedMaxProcessingAttempts > 0
   ? parsedMaxProcessingAttempts
   : DEFAULT_MAX_PROCESSING_ATTEMPTS;
+let randomGenerator = Math.random;
 
 function createConflictError(message, statusCode = 409) {
   const error = new Error(message);
@@ -141,16 +142,24 @@ function scheduleRetry(id, nextAttempt, options) {
 }
 
 function getSimulatedAttemptPlan() {
-  const outcomeRoll = Math.random();
+  const outcomeRoll = randomGenerator();
   const outcome = outcomeRoll < SIMULATED_TIMEOUT_THRESHOLD
     ? 'timeout'
     : outcomeRoll < SIMULATED_FAILURE_THRESHOLD
       ? 'failure'
       : 'success';
   const delayRange = SIMULATED_GATEWAY_MAX_DELAY_EXCLUSIVE_MS - SIMULATED_GATEWAY_MIN_DELAY_MS;
-  const delayMs = SIMULATED_GATEWAY_MIN_DELAY_MS + Math.floor(Math.random() * delayRange);
+  const delayMs = SIMULATED_GATEWAY_MIN_DELAY_MS + Math.floor(randomGenerator() * delayRange);
 
   return { outcome, delayMs };
+}
+
+function setRandomGenerator(generator) {
+  randomGenerator = typeof generator === 'function' ? generator : Math.random;
+}
+
+function resetRandomGenerator() {
+  randomGenerator = Math.random;
 }
 
 function runProcessingAttempt(
@@ -277,4 +286,6 @@ module.exports = {
   createPayment,
   processPayment,
   getPaymentById,
+  setRandomGenerator,
+  resetRandomGenerator,
 };
