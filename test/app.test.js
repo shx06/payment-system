@@ -330,7 +330,7 @@ test('returns validation error for an empty idempotency key header', async () =>
   );
 });
 
-test('simulated gateway mode handles timeout retry and reaches success', async (t) => {
+test('simulated gateway mode handles timeout retry and reaches success', { concurrency: false }, async (t) => {
   const created = await request(app)
     .post('/api/payments')
     .send({ amount: 120, currency: 'USD' });
