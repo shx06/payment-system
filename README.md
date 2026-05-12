@@ -31,13 +31,28 @@ All assignment implementation, future code changes, and pull requests are scoped
   - Rejects conflicting terminal callback states with `409 Conflict`
 - Reporting flow:
   - Payment summary endpoint: `GET /api/reports/payments/summary`
-  - Returns aggregate payment count and amount grouped by status
+  - Returns aggregate payment count/amount grouped by status, plus retry and success-rate metrics
+- Data consistency safeguards:
+  - Cleans up stale idempotency records that reference missing payments
+  - Rolls back create/process state if idempotency persistence fails mid-flow
+- Logging & observability:
+  - Logs creation, processing, retry scheduling, terminal outcomes, callback updates, and internal errors
+- Edge-case handling:
+  - Covers stale idempotency recovery and callback failure without reason
 
-## Pending flows from assignment
+## Assignment completion summary
 
-- Additional data consistency safeguards for partial failures
-- Expanded observability/logging coverage
-- Broader edge-case test coverage beyond current core + retry scenarios
+This backend now fulfills the assignment requirements in `backend_assignment_payment_gateway (1).pdf`:
+
+- Payment lifecycle with status tracking
+- Retry/failure handling with bounded attempts and exponential backoff
+- Idempotency and concurrency control
+- External gateway simulation with success/failure/timeout behavior
+- Webhook/callback handling including duplicate/conflicting callbacks
+- Data consistency safeguards for partial-failure scenarios
+- Reporting API for payment aggregates and reliability metrics
+- Logging/observability for traceability of lifecycle events
+- Integration tests covering core flows, retries, failures, and edge cases
 
 ## Request payloads
 
@@ -97,7 +112,6 @@ or
 - Duplicate create/process requests are treated as idempotent only when the same `Idempotency-Key`
   is reused with the same logical request payload.
 - Storage is in-memory for now, so data resets on restart.
-- Stronger concurrency locking and advanced observability are intentionally left for subsequent feature PRs.
 - Currency validation currently expects a 3-letter uppercase code format.
 
 ## Run locally

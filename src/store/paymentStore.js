@@ -10,6 +10,10 @@ function getPayment(id) {
   return payments.get(id) ?? null;
 }
 
+function deletePayment(id) {
+  payments.delete(id);
+}
+
 function listPayments() {
   return Array.from(payments.values());
 }
@@ -38,6 +42,7 @@ function clearPaymentLocks() {
 module.exports = {
   savePayment,
   getPayment,
+  deletePayment,
   listPayments,
   clearPayments,
   acquirePaymentLock,

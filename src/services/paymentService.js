@@ -1,14 +1,17 @@
 const { randomUUID } = require('node:crypto');
 const {
   getPayment,
+  deletePayment,
   savePayment,
   acquirePaymentLock,
   releasePaymentLock,
 } = require('../store/paymentStore');
 const {
+  deleteIdempotencyRecord,
   getIdempotencyRecord,
   saveIdempotencyRecord,
 } = require('../store/idempotencyStore');
+const logger = require('../utils/logger');
 
 const PAYMENT_STATUSES = {
   PENDING: 'Pending',
@@ -90,10 +93,12 @@ function resolveIdempotentPayment(idempotencyKey, fingerprint) {
 
   const payment = getPayment(existingRecord.paymentId);
   if (!payment) {
-    throw createConflictError(
-      'Internal error: payment referenced by idempotency key no longer exists.',
-      500,
-    );
+    deleteIdempotencyRecord(idempotencyKey);
+    logger.warn('Removed stale idempotency record referencing missing payment.', {
+      idempotencyKey,
+      paymentId: existingRecord.paymentId,
+    });
+    return null;
   }
 
   return payment;
@@ -129,13 +134,30 @@ function createPayment({ amount, currency, reference, idempotencyKey }) {
   };
 
   savePayment(payment);
-  storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
+  try {
+    storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
+  } catch (error) {
+    deletePayment(payment.id);
+    throw error;
+  }
+
+  logger.info('Payment created.', {
+    paymentId: payment.id,
+    amount: payment.amount,
+    currency: payment.currency,
+    hasIdempotencyKey: Boolean(idempotencyKey),
+  });
 
   return { payment, replayed: false };
 }
 
 function scheduleRetry(id, nextAttempt, options) {
   const retryDelay = Math.min(RETRY_BASE_DELAY_MS * (2 ** (nextAttempt - 1)), MAX_RETRY_DELAY_MS);
+  logger.info('Scheduling payment retry.', {
+    paymentId: id,
+    nextAttempt,
+    retryDelay,
+  });
   setTimeout(() => {
     runProcessingAttempt(id, nextAttempt, options);
   }, retryDelay);
@@ -191,6 +213,11 @@ function runProcessingAttempt(
         latestPayment.lastError = null;
         savePayment(latestPayment);
         releasePaymentLock(id);
+        logger.info('Payment processing completed successfully.', {
+          paymentId: id,
+          processingAttempts: latestPayment.processingAttempts,
+          retryCount: latestPayment.retryCount,
+        });
         return;
       }
 
@@ -205,6 +232,12 @@ function runProcessingAttempt(
       if (attempt < MAX_PROCESSING_ATTEMPTS) {
         latestPayment.retryCount += 1;
         savePayment(latestPayment);
+        logger.warn('Payment processing attempt failed; retrying.', {
+          paymentId: id,
+          attempt,
+          retryCount: latestPayment.retryCount,
+          error: latestPayment.lastError,
+        });
         scheduleRetry(id, attempt + 1, { shouldSucceed, failuresBeforeSuccess, gatewayMode });
         return;
       }
@@ -212,9 +245,15 @@ function runProcessingAttempt(
       latestPayment.status = PAYMENT_STATUSES.FAILED;
       savePayment(latestPayment);
       releasePaymentLock(id);
+      logger.warn('Payment processing exhausted retries and failed.', {
+        paymentId: id,
+        attempt,
+        retryCount: latestPayment.retryCount,
+        error: latestPayment.lastError,
+      });
     } catch (error) {
       releasePaymentLock(id);
-      console.error('Failed to process payment attempt.', {
+      logger.error('Failed to process payment attempt.', {
         paymentId: id,
         attempt,
         error,
@@ -261,10 +300,22 @@ function processPayment(
       throw error;
     }
 
+    const previousPaymentState = { ...payment };
     payment.status = PAYMENT_STATUSES.PROCESSING;
     payment.updatedAt = new Date().toISOString();
     savePayment(payment);
-    storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
+    try {
+      storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
+    } catch (error) {
+      savePayment(previousPaymentState);
+      throw error;
+    }
+
+    logger.info('Payment entered processing state.', {
+      paymentId: id,
+      gatewayMode,
+      hasIdempotencyKey: Boolean(idempotencyKey),
+    });
 
     runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess, gatewayMode });
 
@@ -299,6 +350,13 @@ function applyPaymentCallback(id, { status, reason } = {}) {
   payment.updatedAt = new Date().toISOString();
   savePayment(payment);
   releasePaymentLock(id);
+
+  logger.info('Payment updated via callback.', {
+    paymentId: id,
+    status,
+    replayed: false,
+    hasReason: Boolean(reason),
+  });
 
   return { payment, replayed: false };
 }

@@ -9,6 +9,10 @@ function getIdempotencyRecord(key) {
   return idempotencyRecords.get(key) ?? null;
 }
 
+function deleteIdempotencyRecord(key) {
+  idempotencyRecords.delete(key);
+}
+
 function clearIdempotencyRecords() {
   idempotencyRecords.clear();
 }
@@ -16,5 +20,6 @@ function clearIdempotencyRecords() {
 module.exports = {
   saveIdempotencyRecord,
   getIdempotencyRecord,
+  deleteIdempotencyRecord,
   clearIdempotencyRecords,
 };

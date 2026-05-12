@@ -15,16 +15,20 @@ function getPaymentSummaryReport() {
   const countByStatus = buildEmptyStatusMap();
   const amountByStatus = buildEmptyStatusMap();
   let totalAmount = 0;
+  let totalRetries = 0;
 
   for (const payment of payments) {
     countByStatus[payment.status] += 1;
     amountByStatus[payment.status] += payment.amount;
     totalAmount += payment.amount;
+    totalRetries += payment.retryCount ?? 0;
   }
 
   return {
     totalPayments: payments.length,
     totalAmount,
+    totalRetries,
+    successRate: payments.length === 0 ? 0 : countByStatus[PAYMENT_STATUSES.SUCCESS] / payments.length,
     countByStatus,
     amountByStatus,
     generatedAt: new Date().toISOString(),
