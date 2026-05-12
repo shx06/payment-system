@@ -300,7 +300,7 @@ function processPayment(
       throw error;
     }
 
-    const previousPaymentState = { ...payment };
+    const previousPaymentState = structuredClone(payment);
     payment.status = PAYMENT_STATUSES.PROCESSING;
     payment.updatedAt = new Date().toISOString();
     savePayment(payment);
