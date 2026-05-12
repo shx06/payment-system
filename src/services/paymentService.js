@@ -294,7 +294,7 @@ function applyPaymentCallback(id, { status, reason } = {}) {
 
   payment.status = status;
   payment.lastError = status === PAYMENT_STATUSES.FAILED
-    ? (reason ?? payment.lastError ?? 'Payment failed based on callback update.')
+    ? (reason ?? payment.lastError ?? 'Payment failed via callback without specific reason provided.')
     : null;
   payment.updatedAt = new Date().toISOString();
   savePayment(payment);
