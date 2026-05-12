@@ -360,3 +360,82 @@ test('simulated gateway mode retries after timeout and succeeds on second attemp
   assert.equal(finalState.body.data.retryCount, 1);
   assert.equal(finalState.body.data.lastError, null);
 });
+
+test('callback can finalize a processing payment early', { concurrency: false }, async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 140, currency: 'USD' });
+
+  const processingResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ shouldSucceed: true });
+  assert.equal(processingResponse.statusCode, 200);
+  assert.equal(processingResponse.body.data.status, 'Processing');
+
+  const callbackResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Failed', reason: 'Provider declined asynchronously.' });
+
+  assert.equal(callbackResponse.statusCode, 200);
+  assert.equal(callbackResponse.body.data.status, 'Failed');
+  assert.equal(callbackResponse.body.data.lastError, 'Provider declined asynchronously.');
+
+  const finalState = await waitForStatus(created.body.data.id, 'Failed');
+  assert.equal(finalState.statusCode, 200);
+  assert.equal(finalState.body.data.status, 'Failed');
+});
+
+test('callback duplicate with same terminal state is idempotent', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 65, currency: 'USD' });
+
+  const firstCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success' });
+
+  const secondCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success' });
+
+  assert.equal(firstCallback.statusCode, 200);
+  assert.equal(secondCallback.statusCode, 200);
+  assert.equal(secondCallback.headers['callback-replayed'], 'true');
+  assert.equal(secondCallback.body.data.status, 'Success');
+});
+
+test('callback conflicting terminal states returns conflict', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 80, currency: 'USD' });
+
+  const firstCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Success' });
+
+  const conflictingCallback = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Failed', reason: 'Late conflicting callback' });
+
+  assert.equal(firstCallback.statusCode, 200);
+  assert.equal(conflictingCallback.statusCode, 409);
+  assert.equal(conflictingCallback.body.success, false);
+  assert.equal(
+    conflictingCallback.body.error,
+    'Payment is already finalized with a different status.',
+  );
+});
+
+test('callback validates terminal status values', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 80, currency: 'USD' });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Processing' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(response.body.error, 'status must be either "Success" or "Failed".');
+});
