@@ -4,6 +4,7 @@ const request = require('supertest');
 const app = require('../src/app');
 const { clearPayments, clearPaymentLocks } = require('../src/store/paymentStore');
 const { clearIdempotencyRecords } = require('../src/store/idempotencyStore');
+const { setRandomGenerator, resetRandomGenerator } = require('../src/services/paymentService');
 
 async function waitForStatus(paymentId, expectedStatus) {
   const maxAttempts = 20;
@@ -24,6 +25,7 @@ test.beforeEach(() => {
   clearPayments();
   clearPaymentLocks();
   clearIdempotencyRecords();
+  resetRandomGenerator();
 });
 
 test('GET /health returns service health', async () => {
@@ -219,6 +221,23 @@ test('returns validation error for non-integer failuresBeforeSuccess', async () 
   );
 });
 
+test('returns validation error for invalid gatewayMode', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ gatewayMode: 'random' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(
+    response.body.error,
+    'gatewayMode must be either "deterministic" or "simulated" when provided.',
+  );
+});
+
 test('reuses the same payment for duplicate create requests with the same idempotency key', async () => {
   const firstResponse = await request(app)
     .post('/api/payments')
@@ -311,4 +330,33 @@ test('returns validation error for an empty idempotency key header', async () =>
     response.body.error,
     'Idempotency-Key header must be a non-empty string when provided.',
   );
+});
+
+test('simulated gateway mode retries after timeout and succeeds on second attempt', { concurrency: false }, async (t) => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 120, currency: 'USD' });
+
+  const timeoutOutcomeRoll = 0.1;
+  const minDelayRoll = 0;
+  const successOutcomeRoll = 0.95;
+  const randomSequence = [timeoutOutcomeRoll, minDelayRoll, successOutcomeRoll, minDelayRoll];
+  setRandomGenerator(() => randomSequence.shift() ?? successOutcomeRoll);
+  t.after(() => {
+    resetRandomGenerator();
+  });
+
+  const processingResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ gatewayMode: 'simulated' });
+
+  assert.equal(processingResponse.statusCode, 200);
+  assert.equal(processingResponse.body.data.status, 'Processing');
+
+  const finalState = await waitForStatus(created.body.data.id, 'Success');
+  assert.equal(finalState.statusCode, 200);
+  assert.equal(finalState.body.data.status, 'Success');
+  assert.equal(finalState.body.data.processingAttempts, 2);
+  assert.equal(finalState.body.data.retryCount, 1);
+  assert.equal(finalState.body.data.lastError, null);
 });

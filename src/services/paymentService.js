@@ -16,10 +16,18 @@ const PAYMENT_STATUSES = {
   SUCCESS: 'Success',
   FAILED: 'Failed',
 };
+const GATEWAY_MODES = {
+  DETERMINISTIC: 'deterministic',
+  SIMULATED: 'simulated',
+};
 const DEFAULT_PROCESSING_COMPLETION_DELAY_MS = 20;
 const DEFAULT_RETRY_BASE_DELAY_MS = 25;
 const MAX_RETRY_DELAY_MS = 2000;
 const DEFAULT_MAX_PROCESSING_ATTEMPTS = 3;
+const SIMULATED_GATEWAY_MIN_DELAY_MS = 10;
+const SIMULATED_GATEWAY_MAX_DELAY_EXCLUSIVE_MS = 120;
+const SIMULATED_TIMEOUT_THRESHOLD = 0.2;
+const SIMULATED_FAILURE_THRESHOLD = 0.6;
 const parsedProcessingCompletionDelay = Number.parseInt(process.env.PAYMENT_PROCESSING_DELAY_MS ?? '', 10);
 const parsedRetryBaseDelay = Number.parseInt(process.env.PAYMENT_RETRY_BASE_DELAY_MS ?? '', 10);
 const parsedMaxProcessingAttempts = Number.parseInt(
@@ -35,6 +43,7 @@ const RETRY_BASE_DELAY_MS = Number.isInteger(parsedRetryBaseDelay) && parsedRetr
 const MAX_PROCESSING_ATTEMPTS = Number.isInteger(parsedMaxProcessingAttempts) && parsedMaxProcessingAttempts > 0
   ? parsedMaxProcessingAttempts
   : DEFAULT_MAX_PROCESSING_ATTEMPTS;
+let randomGenerator = Math.random;
 
 function createConflictError(message, statusCode = 409) {
   const error = new Error(message);
@@ -51,15 +60,17 @@ function buildCreatePaymentFingerprint({ amount, currency, reference }) {
   });
 }
 
-function buildProcessPaymentFingerprint(id, { shouldSucceed, failuresBeforeSuccess }) {
+function buildProcessPaymentFingerprint(id, { shouldSucceed, failuresBeforeSuccess, gatewayMode }) {
   const normalizedShouldSucceed = shouldSucceed ?? true;
   const normalizedFailuresBeforeSuccess = failuresBeforeSuccess ?? 0;
+  const normalizedGatewayMode = gatewayMode ?? GATEWAY_MODES.DETERMINISTIC;
 
   return JSON.stringify({
     scope: 'process-payment',
     paymentId: id,
     shouldSucceed: normalizedShouldSucceed,
     failuresBeforeSuccess: normalizedFailuresBeforeSuccess,
+    gatewayMode: normalizedGatewayMode,
   });
 }
 
@@ -130,7 +141,36 @@ function scheduleRetry(id, nextAttempt, options) {
   }, retryDelay);
 }
 
-function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBeforeSuccess = 0 } = {}) {
+function getSimulatedAttemptPlan() {
+  const outcomeRoll = randomGenerator();
+  let outcome = 'success';
+  if (outcomeRoll < SIMULATED_TIMEOUT_THRESHOLD) {
+    outcome = 'timeout';
+  } else if (outcomeRoll < SIMULATED_FAILURE_THRESHOLD) {
+    outcome = 'failure';
+  }
+  const delayRange = SIMULATED_GATEWAY_MAX_DELAY_EXCLUSIVE_MS - SIMULATED_GATEWAY_MIN_DELAY_MS;
+  const delayMs = SIMULATED_GATEWAY_MIN_DELAY_MS + Math.floor(randomGenerator() * delayRange);
+
+  return { outcome, delayMs };
+}
+
+function setRandomGenerator(generator) {
+  randomGenerator = typeof generator === 'function' ? generator : Math.random;
+}
+
+function resetRandomGenerator() {
+  randomGenerator = Math.random;
+}
+
+function runProcessingAttempt(
+  id,
+  attempt,
+  { shouldSucceed = true, failuresBeforeSuccess = 0, gatewayMode = GATEWAY_MODES.DETERMINISTIC } = {},
+) {
+  const simulatedPlan = gatewayMode === GATEWAY_MODES.SIMULATED ? getSimulatedAttemptPlan() : null;
+  const completionDelayMs = simulatedPlan ? simulatedPlan.delayMs : PROCESSING_COMPLETION_DELAY_MS;
+
   setTimeout(() => {
     try {
       const latestPayment = getPayment(id);
@@ -142,7 +182,9 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
       latestPayment.processingAttempts += 1;
       latestPayment.updatedAt = new Date().toISOString();
 
-      const wasSuccessful = shouldSucceed && attempt > failuresBeforeSuccess;
+      const wasSuccessful = simulatedPlan
+        ? simulatedPlan.outcome === 'success'
+        : shouldSucceed && attempt > failuresBeforeSuccess;
 
       if (wasSuccessful) {
         latestPayment.status = PAYMENT_STATUSES.SUCCESS;
@@ -152,12 +194,18 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
         return;
       }
 
-      latestPayment.lastError = `Gateway processing failed on attempt ${attempt}.`;
+      if (simulatedPlan) {
+        latestPayment.lastError = simulatedPlan.outcome === 'timeout'
+          ? `Gateway request timed out on attempt ${attempt}.`
+          : `Gateway processing failed on attempt ${attempt}.`;
+      } else {
+        latestPayment.lastError = `Gateway processing failed on attempt ${attempt}.`;
+      }
 
       if (attempt < MAX_PROCESSING_ATTEMPTS) {
         latestPayment.retryCount += 1;
         savePayment(latestPayment);
-        scheduleRetry(id, attempt + 1, { shouldSucceed, failuresBeforeSuccess });
+        scheduleRetry(id, attempt + 1, { shouldSucceed, failuresBeforeSuccess, gatewayMode });
         return;
       }
 
@@ -172,14 +220,23 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
         error,
       });
     }
-  }, PROCESSING_COMPLETION_DELAY_MS);
+  }, completionDelayMs);
 }
 
 function processPayment(
   id,
-  { shouldSucceed = true, failuresBeforeSuccess = 0, idempotencyKey } = {},
+  {
+    shouldSucceed = true,
+    failuresBeforeSuccess = 0,
+    gatewayMode = GATEWAY_MODES.DETERMINISTIC,
+    idempotencyKey,
+  } = {},
 ) {
-  const fingerprint = buildProcessPaymentFingerprint(id, { shouldSucceed, failuresBeforeSuccess });
+  const fingerprint = buildProcessPaymentFingerprint(id, {
+    shouldSucceed,
+    failuresBeforeSuccess,
+    gatewayMode,
+  });
   const existingPayment = resolveIdempotentPayment(idempotencyKey, fingerprint);
   if (existingPayment) {
     return { payment: existingPayment, replayed: true };
@@ -209,7 +266,7 @@ function processPayment(
     savePayment(payment);
     storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
 
-    runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess });
+    runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess, gatewayMode });
 
     return { payment, replayed: false };
   } catch (error) {
@@ -230,4 +287,6 @@ module.exports = {
   createPayment,
   processPayment,
   getPaymentById,
+  setRandomGenerator,
+  resetRandomGenerator,
 };

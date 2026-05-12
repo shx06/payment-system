@@ -21,10 +21,12 @@ All assignment implementation, future code changes, and pull requests are scoped
 - Concurrency control flow:
   - Prevents parallel processing of the same payment during in-flight processing
   - Returns `409 Conflict` if another processing request is already active
+- External gateway simulation flow:
+  - Process payment can run in `simulated` gateway mode with random success/failure/timeout and random delay
+  - Timeouts and failures are retried with existing backoff and attempt limits
 
 ## Pending flows from assignment
 
-- External gateway simulation (random success/failure/delay/timeout)
 - Webhook/callback handling (early/duplicate/conflicting callbacks)
 - Additional data consistency safeguards for partial failures
 - Expanded observability/logging coverage
@@ -53,7 +55,8 @@ Idempotency-Key: create-payment-1
 ```json
 {
   "shouldSucceed": true,
-  "failuresBeforeSuccess": 1
+  "failuresBeforeSuccess": 1,
+  "gatewayMode": "deterministic"
 }
 ```
 
@@ -66,11 +69,12 @@ Idempotency-Key: process-payment-1
 ## Assumptions (for ambiguous requirements)
 
 - This implementation covers payment lifecycle plus retry/backoff handling.
+- External gateway simulation is enabled by setting `"gatewayMode": "simulated"` on process requests.
 - Duplicate create/process requests are treated as idempotent only when the same `Idempotency-Key`
   is reused with the same logical request payload.
 - Storage is in-memory for now, so data resets on restart.
-- Stronger concurrency locking, gateway randomness/timeouts, webhooks, and advanced observability
-  are intentionally left for subsequent feature PRs.
+- Stronger concurrency locking, webhooks/callbacks, and advanced observability are intentionally
+  left for subsequent feature PRs.
 - Currency validation currently expects a 3-letter uppercase code format.
 
 ## Run locally

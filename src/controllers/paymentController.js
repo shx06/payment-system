@@ -42,6 +42,14 @@ function validateProcessPayload(payload) {
     return 'failuresBeforeSuccess must be a non-negative integer when provided.';
   }
 
+  if (
+    payload.gatewayMode !== undefined
+    && payload.gatewayMode !== 'deterministic'
+    && payload.gatewayMode !== 'simulated'
+  ) {
+    return 'gatewayMode must be either "deterministic" or "simulated" when provided.';
+  }
+
   return null;
 }
 
