@@ -29,6 +29,9 @@ All assignment implementation, future code changes, and pull requests are scoped
   - Handles early callback finalization for in-flight processing
   - Treats duplicate callback states as idempotent replays
   - Rejects conflicting terminal callback states with `409 Conflict`
+- Reporting flow:
+  - Payment summary endpoint: `GET /api/reports/payments/summary`
+  - Returns aggregate payment count and amount grouped by status
 
 ## Pending flows from assignment
 
@@ -94,8 +97,7 @@ or
 - Duplicate create/process requests are treated as idempotent only when the same `Idempotency-Key`
   is reused with the same logical request payload.
 - Storage is in-memory for now, so data resets on restart.
-- Stronger concurrency locking, webhooks/callbacks, and advanced observability are intentionally
-  left for subsequent feature PRs.
+- Stronger concurrency locking and advanced observability are intentionally left for subsequent feature PRs.
 - Currency validation currently expects a 3-letter uppercase code format.
 
 ## Run locally
