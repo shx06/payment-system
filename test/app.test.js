@@ -330,7 +330,7 @@ test('returns validation error for an empty idempotency key header', async () =>
   );
 });
 
-test('simulated gateway mode handles timeout retry and reaches success', { concurrency: false }, async (t) => {
+test('simulated gateway mode retries after timeout and succeeds on second attempt', { concurrency: false }, async (t) => {
   const created = await request(app)
     .post('/api/payments')
     .send({ amount: 120, currency: 'USD' });
@@ -339,8 +339,9 @@ test('simulated gateway mode handles timeout retry and reaches success', { concu
   const timeoutOutcomeRoll = 0.1;
   const minDelayRoll = 0;
   const successOutcomeRoll = 0.95;
+  const fallbackSuccessOutcomeRoll = successOutcomeRoll;
   const randomSequence = [timeoutOutcomeRoll, minDelayRoll, successOutcomeRoll, minDelayRoll];
-  Math.random = () => randomSequence.shift() ?? 0.95;
+  Math.random = () => randomSequence.shift() ?? fallbackSuccessOutcomeRoll;
   t.after(() => {
     Math.random = originalRandom;
   });
