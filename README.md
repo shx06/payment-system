@@ -18,10 +18,12 @@ All assignment implementation, future code changes, and pull requests are scoped
 - Idempotency flow:
   - Optional `Idempotency-Key` header safely replays duplicate create/process requests
   - Conflicting reuse of an idempotency key returns `409 Conflict`
+- Concurrency control flow:
+  - Prevents parallel processing of the same payment during in-flight processing
+  - Returns `409 Conflict` if another processing request is already active
 
 ## Pending flows from assignment
 
-- Stronger concurrency control for simultaneous process calls
 - External gateway simulation (random success/failure/delay/timeout)
 - Webhook/callback handling (early/duplicate/conflicting callbacks)
 - Additional data consistency safeguards for partial failures
