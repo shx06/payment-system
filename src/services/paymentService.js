@@ -275,6 +275,34 @@ function processPayment(
   }
 }
 
+function applyPaymentCallback(id, { status, reason } = {}) {
+  const payment = getPayment(id);
+
+  if (!payment) {
+    const error = new Error('Payment not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (payment.status === status) {
+    return { payment, replayed: true };
+  }
+
+  if (payment.status === PAYMENT_STATUSES.SUCCESS || payment.status === PAYMENT_STATUSES.FAILED) {
+    throw createConflictError('Payment is already finalized with a different status.');
+  }
+
+  payment.status = status;
+  payment.lastError = status === PAYMENT_STATUSES.FAILED
+    ? (reason ?? payment.lastError ?? 'Payment failed via callback without specific reason provided.')
+    : null;
+  payment.updatedAt = new Date().toISOString();
+  savePayment(payment);
+  releasePaymentLock(id);
+
+  return { payment, replayed: false };
+}
+
 function getPaymentById(id) {
   return getPayment(id);
 }
@@ -286,6 +314,7 @@ module.exports = {
   MAX_PROCESSING_ATTEMPTS,
   createPayment,
   processPayment,
+  applyPaymentCallback,
   getPaymentById,
   setRandomGenerator,
   resetRandomGenerator,

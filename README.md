@@ -24,10 +24,14 @@ All assignment implementation, future code changes, and pull requests are scoped
 - External gateway simulation flow:
   - Process payment can run in `simulated` gateway mode with random success/failure/timeout and random delay
   - Timeouts and failures are retried with existing backoff and attempt limits
+- Webhook/callback flow:
+  - Callback endpoint: `POST /api/payments/:paymentId/callback`
+  - Handles early callback finalization for in-flight processing
+  - Treats duplicate callback states as idempotent replays
+  - Rejects conflicting terminal callback states with `409 Conflict`
 
 ## Pending flows from assignment
 
-- Webhook/callback handling (early/duplicate/conflicting callbacks)
 - Additional data consistency safeguards for partial failures
 - Expanded observability/logging coverage
 - Broader edge-case test coverage beyond current core + retry scenarios
@@ -64,6 +68,23 @@ Optional header:
 
 ```text
 Idempotency-Key: process-payment-1
+```
+
+### Payment callback
+
+```json
+{
+  "status": "Success"
+}
+```
+
+or
+
+```json
+{
+  "status": "Failed",
+  "reason": "Provider declined asynchronously."
+}
 ```
 
 ## Assumptions (for ambiguous requirements)

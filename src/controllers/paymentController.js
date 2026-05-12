@@ -1,4 +1,10 @@
-const { createPayment, getPaymentById, processPayment } = require('../services/paymentService');
+const {
+  PAYMENT_STATUSES,
+  applyPaymentCallback,
+  createPayment,
+  getPaymentById,
+  processPayment,
+} = require('../services/paymentService');
 
 function validateCreatePaymentPayload(payload) {
   if (!payload || typeof payload !== 'object') {
@@ -48,6 +54,22 @@ function validateProcessPayload(payload) {
     && payload.gatewayMode !== 'simulated'
   ) {
     return 'gatewayMode must be either "deterministic" or "simulated" when provided.';
+  }
+
+  return null;
+}
+
+function validateCallbackPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return 'Request body must be a valid JSON object.';
+  }
+
+  if (payload.status !== PAYMENT_STATUSES.SUCCESS && payload.status !== PAYMENT_STATUSES.FAILED) {
+    return 'status must be either "Success" or "Failed".';
+  }
+
+  if (payload.reason !== undefined && (typeof payload.reason !== 'string' || payload.reason.trim().length === 0)) {
+    return 'reason must be a non-empty string when provided.';
   }
 
   return null;
@@ -123,8 +145,30 @@ function getPaymentHandler(req, res) {
   return res.status(200).json({ success: true, data: payment });
 }
 
+function paymentCallbackHandler(req, res, next) {
+  const validationError = validateCallbackPayload(req.body);
+  if (validationError) {
+    return res.status(400).json({ success: false, error: validationError });
+  }
+
+  try {
+    const callbackPayload = {
+      status: req.body.status,
+      reason: req.body.reason?.trim(),
+    };
+    const { payment, replayed } = applyPaymentCallback(req.params.paymentId, callbackPayload);
+    if (replayed) {
+      res.set('Callback-Replayed', 'true');
+    }
+    return res.status(200).json({ success: true, data: payment });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   createPaymentHandler,
   processPaymentHandler,
   getPaymentHandler,
+  paymentCallbackHandler,
 };
