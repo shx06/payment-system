@@ -25,7 +25,9 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 25;
 const MAX_RETRY_DELAY_MS = 2000;
 const DEFAULT_MAX_PROCESSING_ATTEMPTS = 3;
 const SIMULATED_GATEWAY_MIN_DELAY_MS = 10;
-const SIMULATED_GATEWAY_MAX_DELAY_MS = 120;
+const SIMULATED_GATEWAY_MAX_DELAY_EXCLUSIVE_MS = 120;
+const SIMULATED_TIMEOUT_THRESHOLD = 0.2;
+const SIMULATED_FAILURE_THRESHOLD = 0.6;
 const parsedProcessingCompletionDelay = Number.parseInt(process.env.PAYMENT_PROCESSING_DELAY_MS ?? '', 10);
 const parsedRetryBaseDelay = Number.parseInt(process.env.PAYMENT_RETRY_BASE_DELAY_MS ?? '', 10);
 const parsedMaxProcessingAttempts = Number.parseInt(
@@ -140,12 +142,12 @@ function scheduleRetry(id, nextAttempt, options) {
 
 function getSimulatedAttemptPlan() {
   const outcomeRoll = Math.random();
-  const outcome = outcomeRoll < 0.2
+  const outcome = outcomeRoll < SIMULATED_TIMEOUT_THRESHOLD
     ? 'timeout'
-    : outcomeRoll < 0.6
+    : outcomeRoll < SIMULATED_FAILURE_THRESHOLD
       ? 'failure'
       : 'success';
-  const delayRange = SIMULATED_GATEWAY_MAX_DELAY_MS - SIMULATED_GATEWAY_MIN_DELAY_MS + 1;
+  const delayRange = SIMULATED_GATEWAY_MAX_DELAY_EXCLUSIVE_MS - SIMULATED_GATEWAY_MIN_DELAY_MS;
   const delayMs = SIMULATED_GATEWAY_MIN_DELAY_MS + Math.floor(Math.random() * delayRange);
 
   return { outcome, delayMs };

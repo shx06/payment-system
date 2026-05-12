@@ -336,7 +336,10 @@ test('simulated gateway mode handles timeout retry and reaches success', async (
     .send({ amount: 120, currency: 'USD' });
 
   const originalRandom = Math.random;
-  const randomSequence = [0.1, 0, 0.95, 0];
+  const timeoutOutcomeRoll = 0.1;
+  const minDelayRoll = 0;
+  const successOutcomeRoll = 0.95;
+  const randomSequence = [timeoutOutcomeRoll, minDelayRoll, successOutcomeRoll, minDelayRoll];
   Math.random = () => randomSequence.shift() ?? 0.95;
   t.after(() => {
     Math.random = originalRandom;
