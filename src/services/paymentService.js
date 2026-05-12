@@ -47,11 +47,14 @@ function buildCreatePaymentFingerprint({ amount, currency, reference }) {
 }
 
 function buildProcessPaymentFingerprint(id, { shouldSucceed, failuresBeforeSuccess }) {
+  const normalizedShouldSucceed = shouldSucceed ?? true;
+  const normalizedFailuresBeforeSuccess = failuresBeforeSuccess ?? 0;
+
   return JSON.stringify({
     scope: 'process-payment',
     paymentId: id,
-    shouldSucceed,
-    failuresBeforeSuccess,
+    shouldSucceed: normalizedShouldSucceed,
+    failuresBeforeSuccess: normalizedFailuresBeforeSuccess,
   });
 }
 
@@ -71,7 +74,10 @@ function resolveIdempotentPayment(idempotencyKey, fingerprint) {
 
   const payment = getPayment(existingRecord.paymentId);
   if (!payment) {
-    throw createConflictError('Stored idempotent payment could not be found.', 500);
+    throw createConflictError(
+      'Internal error: payment referenced by idempotency key no longer exists.',
+      500,
+    );
   }
 
   return payment;
