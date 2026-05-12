@@ -219,6 +219,23 @@ test('returns validation error for non-integer failuresBeforeSuccess', async () 
   );
 });
 
+test('returns validation error for invalid gatewayMode', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ gatewayMode: 'random' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(
+    response.body.error,
+    'gatewayMode must be either "deterministic" or "simulated" when provided.',
+  );
+});
+
 test('reuses the same payment for duplicate create requests with the same idempotency key', async () => {
   const firstResponse = await request(app)
     .post('/api/payments')
@@ -311,4 +328,31 @@ test('returns validation error for an empty idempotency key header', async () =>
     response.body.error,
     'Idempotency-Key header must be a non-empty string when provided.',
   );
+});
+
+test('simulated gateway mode handles timeout retry and reaches success', async (t) => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 120, currency: 'USD' });
+
+  const originalRandom = Math.random;
+  const randomSequence = [0.1, 0, 0.95, 0];
+  Math.random = () => randomSequence.shift() ?? 0.95;
+  t.after(() => {
+    Math.random = originalRandom;
+  });
+
+  const processingResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .send({ gatewayMode: 'simulated' });
+
+  assert.equal(processingResponse.statusCode, 200);
+  assert.equal(processingResponse.body.data.status, 'Processing');
+
+  const finalState = await waitForStatus(created.body.data.id, 'Success');
+  assert.equal(finalState.statusCode, 200);
+  assert.equal(finalState.body.data.status, 'Success');
+  assert.equal(finalState.body.data.processingAttempts, 2);
+  assert.equal(finalState.body.data.retryCount, 1);
+  assert.equal(finalState.body.data.lastError, null);
 });
