@@ -340,9 +340,8 @@ test('simulated gateway mode retries after timeout and succeeds on second attemp
   const timeoutOutcomeRoll = 0.1;
   const minDelayRoll = 0;
   const successOutcomeRoll = 0.95;
-  const fallbackSuccessOutcomeRoll = successOutcomeRoll;
   const randomSequence = [timeoutOutcomeRoll, minDelayRoll, successOutcomeRoll, minDelayRoll];
-  setRandomGenerator(() => randomSequence.shift() ?? fallbackSuccessOutcomeRoll);
+  setRandomGenerator(() => randomSequence.shift() ?? successOutcomeRoll);
   t.after(() => {
     resetRandomGenerator();
   });

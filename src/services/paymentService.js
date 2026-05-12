@@ -143,11 +143,12 @@ function scheduleRetry(id, nextAttempt, options) {
 
 function getSimulatedAttemptPlan() {
   const outcomeRoll = randomGenerator();
-  const outcome = outcomeRoll < SIMULATED_TIMEOUT_THRESHOLD
-    ? 'timeout'
-    : outcomeRoll < SIMULATED_FAILURE_THRESHOLD
-      ? 'failure'
-      : 'success';
+  let outcome = 'success';
+  if (outcomeRoll < SIMULATED_TIMEOUT_THRESHOLD) {
+    outcome = 'timeout';
+  } else if (outcomeRoll < SIMULATED_FAILURE_THRESHOLD) {
+    outcome = 'failure';
+  }
   const delayRange = SIMULATED_GATEWAY_MAX_DELAY_EXCLUSIVE_MS - SIMULATED_GATEWAY_MIN_DELAY_MS;
   const delayMs = SIMULATED_GATEWAY_MIN_DELAY_MS + Math.floor(randomGenerator() * delayRange);
 
