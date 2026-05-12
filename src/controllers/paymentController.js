@@ -45,24 +45,60 @@ function validateProcessPayload(payload) {
   return null;
 }
 
-function createPaymentHandler(req, res) {
+function getIdempotencyKey(req) {
+  const headerValue = req.get('Idempotency-Key');
+
+  if (headerValue === undefined) {
+    return { value: undefined };
+  }
+
+  if (typeof headerValue !== 'string' || headerValue.trim().length === 0) {
+    return { error: 'Idempotency-Key header must be a non-empty string when provided.' };
+  }
+
+  return { value: headerValue.trim() };
+}
+
+function createPaymentHandler(req, res, next) {
+  const { value: idempotencyKey, error: idempotencyError } = getIdempotencyKey(req);
+  if (idempotencyError) {
+    return res.status(400).json({ success: false, error: idempotencyError });
+  }
+
   const validationError = validateCreatePaymentPayload(req.body);
   if (validationError) {
     return res.status(400).json({ success: false, error: validationError });
   }
 
-  const payment = createPayment(req.body);
-  return res.status(201).json({ success: true, data: payment });
+  try {
+    const { payment, replayed } = createPayment({ ...req.body, idempotencyKey });
+    if (replayed) {
+      res.set('Idempotency-Replayed', 'true');
+      return res.status(200).json({ success: true, data: payment });
+    }
+
+    return res.status(201).json({ success: true, data: payment });
+  } catch (error) {
+    return next(error);
+  }
 }
 
 function processPaymentHandler(req, res, next) {
+  const { value: idempotencyKey, error: idempotencyError } = getIdempotencyKey(req);
+  if (idempotencyError) {
+    return res.status(400).json({ success: false, error: idempotencyError });
+  }
+
   const validationError = validateProcessPayload(req.body);
   if (validationError) {
     return res.status(400).json({ success: false, error: validationError });
   }
 
   try {
-    const payment = processPayment(req.params.paymentId, req.body);
+    const { payment, replayed } = processPayment(req.params.paymentId, { ...req.body, idempotencyKey });
+    if (replayed) {
+      res.set('Idempotency-Replayed', 'true');
+    }
     return res.status(200).json({ success: true, data: payment });
   } catch (error) {
     return next(error);
