@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const app = require('../src/app');
 const { clearPayments, clearPaymentLocks } = require('../src/store/paymentStore');
-const { clearIdempotencyRecords } = require('../src/store/idempotencyStore');
+const { clearIdempotencyRecords, saveIdempotencyRecord } = require('../src/store/idempotencyStore');
 const { setRandomGenerator, resetRandomGenerator } = require('../src/services/paymentService');
 
 async function waitForStatus(paymentId, expectedStatus) {
@@ -332,6 +332,53 @@ test('returns validation error for an empty idempotency key header', async () =>
   );
 });
 
+test('stale create idempotency record is cleaned up and request succeeds', async () => {
+  saveIdempotencyRecord('stale-create-key', {
+    fingerprint: JSON.stringify({
+      scope: 'create-payment',
+      amount: 150.5,
+      currency: 'USD',
+      reference: 'INV-1001',
+    }),
+    paymentId: 'missing-payment-id',
+  });
+
+  const response = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', 'stale-create-key')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1001' });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.success, true);
+  assert.equal(typeof response.body.data.id, 'string');
+});
+
+test('stale process idempotency record is cleaned up and request succeeds', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 99, currency: 'USD' });
+
+  saveIdempotencyRecord('stale-process-key', {
+    fingerprint: JSON.stringify({
+      scope: 'process-payment',
+      paymentId: created.body.data.id,
+      shouldSucceed: true,
+      failuresBeforeSuccess: 0,
+      gatewayMode: 'deterministic',
+    }),
+    paymentId: 'missing-payment-id',
+  });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .set('Idempotency-Key', 'stale-process-key')
+    .send({ shouldSucceed: true });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(response.body.data.status, 'Processing');
+});
+
 test('simulated gateway mode retries after timeout and succeeds on second attempt', { concurrency: false }, async (t) => {
   const created = await request(app)
     .post('/api/payments')
@@ -368,6 +415,8 @@ test('GET /api/reports/payments/summary returns empty aggregates when no payment
   assert.equal(response.body.success, true);
   assert.equal(response.body.data.totalPayments, 0);
   assert.equal(response.body.data.totalAmount, 0);
+  assert.equal(response.body.data.totalRetries, 0);
+  assert.equal(response.body.data.successRate, 0);
   assert.deepEqual(response.body.data.countByStatus, {
     Pending: 0,
     Processing: 0,
@@ -411,6 +460,8 @@ test('GET /api/reports/payments/summary returns aggregated counts and amounts by
   assert.equal(summaryResponse.body.success, true);
   assert.equal(summaryResponse.body.data.totalPayments, 3);
   assert.equal(summaryResponse.body.data.totalAmount, 250.5);
+  assert.equal(summaryResponse.body.data.totalRetries, 0);
+  assert.equal(summaryResponse.body.data.successRate, 1 / 3);
   assert.deepEqual(summaryResponse.body.data.countByStatus, {
     Pending: 1,
     Processing: 0,
@@ -502,4 +553,21 @@ test('callback validates terminal status values', async () => {
   assert.equal(response.statusCode, 400);
   assert.equal(response.body.success, false);
   assert.equal(response.body.error, 'status must be either "Success" or "Failed".');
+});
+
+test('callback failed without reason uses default message', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 60, currency: 'USD' });
+
+  const response = await request(app)
+    .post(`/api/payments/${created.body.data.id}/callback`)
+    .send({ status: 'Failed' });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.data.status, 'Failed');
+  assert.equal(
+    response.body.data.lastError,
+    'Payment failed via callback without specific reason provided.',
+  );
 });
