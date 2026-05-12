@@ -1,5 +1,9 @@
 const { randomUUID } = require('node:crypto');
 const { getPayment, savePayment } = require('../store/paymentStore');
+const {
+  getIdempotencyRecord,
+  saveIdempotencyRecord,
+} = require('../store/idempotencyStore');
 
 const PAYMENT_STATUSES = {
   PENDING: 'Pending',
@@ -27,7 +31,67 @@ const MAX_PROCESSING_ATTEMPTS = Number.isInteger(parsedMaxProcessingAttempts) &&
   ? parsedMaxProcessingAttempts
   : DEFAULT_MAX_PROCESSING_ATTEMPTS;
 
-function createPayment({ amount, currency, reference }) {
+function createConflictError(message, statusCode = 409) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function buildCreatePaymentFingerprint({ amount, currency, reference }) {
+  return JSON.stringify({
+    scope: 'create-payment',
+    amount,
+    currency,
+    reference: reference ?? null,
+  });
+}
+
+function buildProcessPaymentFingerprint(id, { shouldSucceed, failuresBeforeSuccess }) {
+  return JSON.stringify({
+    scope: 'process-payment',
+    paymentId: id,
+    shouldSucceed,
+    failuresBeforeSuccess,
+  });
+}
+
+function resolveIdempotentPayment(idempotencyKey, fingerprint) {
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  const existingRecord = getIdempotencyRecord(idempotencyKey);
+  if (!existingRecord) {
+    return null;
+  }
+
+  if (existingRecord.fingerprint !== fingerprint) {
+    throw createConflictError('Idempotency key is already used for a different request.');
+  }
+
+  const payment = getPayment(existingRecord.paymentId);
+  if (!payment) {
+    throw createConflictError('Stored idempotent payment could not be found.', 500);
+  }
+
+  return payment;
+}
+
+function storeIdempotencyRecord(idempotencyKey, fingerprint, paymentId) {
+  if (!idempotencyKey) {
+    return;
+  }
+
+  saveIdempotencyRecord(idempotencyKey, { fingerprint, paymentId });
+}
+
+function createPayment({ amount, currency, reference, idempotencyKey }) {
+  const fingerprint = buildCreatePaymentFingerprint({ amount, currency, reference });
+  const existingPayment = resolveIdempotentPayment(idempotencyKey, fingerprint);
+  if (existingPayment) {
+    return { payment: existingPayment, replayed: true };
+  }
+
   const now = new Date().toISOString();
   const payment = {
     id: randomUUID(),
@@ -42,7 +106,10 @@ function createPayment({ amount, currency, reference }) {
     updatedAt: now,
   };
 
-  return savePayment(payment);
+  savePayment(payment);
+  storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
+
+  return { payment, replayed: false };
 }
 
 function scheduleRetry(id, nextAttempt, options) {
@@ -93,7 +160,16 @@ function runProcessingAttempt(id, attempt, { shouldSucceed = true, failuresBefor
   }, PROCESSING_COMPLETION_DELAY_MS);
 }
 
-function processPayment(id, { shouldSucceed = true, failuresBeforeSuccess = 0 } = {}) {
+function processPayment(
+  id,
+  { shouldSucceed = true, failuresBeforeSuccess = 0, idempotencyKey } = {},
+) {
+  const fingerprint = buildProcessPaymentFingerprint(id, { shouldSucceed, failuresBeforeSuccess });
+  const existingPayment = resolveIdempotentPayment(idempotencyKey, fingerprint);
+  if (existingPayment) {
+    return { payment: existingPayment, replayed: true };
+  }
+
   const payment = getPayment(id);
 
   if (!payment) {
@@ -111,10 +187,11 @@ function processPayment(id, { shouldSucceed = true, failuresBeforeSuccess = 0 } 
   payment.status = PAYMENT_STATUSES.PROCESSING;
   payment.updatedAt = new Date().toISOString();
   savePayment(payment);
+  storeIdempotencyRecord(idempotencyKey, fingerprint, payment.id);
 
   runProcessingAttempt(id, 1, { shouldSucceed, failuresBeforeSuccess });
 
-  return payment;
+  return { payment, replayed: false };
 }
 
 function getPaymentById(id) {

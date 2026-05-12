@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const request = require('supertest');
 const app = require('../src/app');
 const { clearPayments } = require('../src/store/paymentStore');
+const { clearIdempotencyRecords } = require('../src/store/idempotencyStore');
 
 async function waitForStatus(paymentId, expectedStatus) {
   const maxAttempts = 20;
@@ -21,6 +22,7 @@ async function waitForStatus(paymentId, expectedStatus) {
 
 test.beforeEach(() => {
   clearPayments();
+  clearIdempotencyRecords();
 });
 
 test('GET /health returns service health', async () => {
@@ -191,5 +193,99 @@ test('returns validation error for non-integer failuresBeforeSuccess', async () 
   assert.equal(
     response.body.error,
     'failuresBeforeSuccess must be a non-negative integer when provided.',
+  );
+});
+
+test('reuses the same payment for duplicate create requests with the same idempotency key', async () => {
+  const firstResponse = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', 'create-payment-1')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1001' });
+
+  const secondResponse = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', 'create-payment-1')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1001' });
+
+  assert.equal(firstResponse.statusCode, 201);
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(secondResponse.headers['idempotency-replayed'], 'true');
+  assert.equal(secondResponse.body.data.id, firstResponse.body.data.id);
+});
+
+test('returns conflict when a create idempotency key is reused for a different payload', async () => {
+  const firstResponse = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', 'create-payment-conflict')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1001' });
+
+  const secondResponse = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', 'create-payment-conflict')
+    .send({ amount: 200, currency: 'USD', reference: 'INV-2002' });
+
+  assert.equal(firstResponse.statusCode, 201);
+  assert.equal(secondResponse.statusCode, 409);
+  assert.equal(secondResponse.body.success, false);
+  assert.equal(secondResponse.body.error, 'Idempotency key is already used for a different request.');
+});
+
+test('reuses the same processing request for duplicate process calls with the same idempotency key', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const firstResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .set('Idempotency-Key', 'process-payment-1')
+    .send({ shouldSucceed: true });
+
+  const secondResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .set('Idempotency-Key', 'process-payment-1')
+    .send({ shouldSucceed: true });
+
+  assert.equal(firstResponse.statusCode, 200);
+  assert.equal(secondResponse.statusCode, 200);
+  assert.equal(secondResponse.headers['idempotency-replayed'], 'true');
+  assert.equal(secondResponse.body.data.id, firstResponse.body.data.id);
+
+  const finalState = await waitForStatus(created.body.data.id, 'Success');
+  assert.equal(finalState.body.data.processingAttempts, 1);
+  assert.equal(finalState.body.data.retryCount, 0);
+});
+
+test('returns conflict when a process idempotency key is reused for a different payload', async () => {
+  const created = await request(app)
+    .post('/api/payments')
+    .send({ amount: 100, currency: 'USD' });
+
+  const firstResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .set('Idempotency-Key', 'process-payment-conflict')
+    .send({ shouldSucceed: true, failuresBeforeSuccess: 0 });
+
+  const secondResponse = await request(app)
+    .post(`/api/payments/${created.body.data.id}/process`)
+    .set('Idempotency-Key', 'process-payment-conflict')
+    .send({ shouldSucceed: true, failuresBeforeSuccess: 1 });
+
+  assert.equal(firstResponse.statusCode, 200);
+  assert.equal(secondResponse.statusCode, 409);
+  assert.equal(secondResponse.body.success, false);
+  assert.equal(secondResponse.body.error, 'Idempotency key is already used for a different request.');
+});
+
+test('returns validation error for an empty idempotency key header', async () => {
+  const response = await request(app)
+    .post('/api/payments')
+    .set('Idempotency-Key', '   ')
+    .send({ amount: 150.5, currency: 'USD', reference: 'INV-1001' });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body.success, false);
+  assert.equal(
+    response.body.error,
+    'Idempotency-Key header must be a non-empty string when provided.',
   );
 });
