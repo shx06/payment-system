@@ -1,7 +1,7 @@
 const { PAYMENT_STATUSES } = require('./paymentService');
 const { listPayments } = require('../store/paymentStore');
 
-function buildEmptyStatusAmountMap() {
+function buildEmptyStatusMap() {
   return {
     [PAYMENT_STATUSES.PENDING]: 0,
     [PAYMENT_STATUSES.PROCESSING]: 0,
@@ -12,22 +12,19 @@ function buildEmptyStatusAmountMap() {
 
 function getPaymentSummaryReport() {
   const payments = listPayments();
-  const countByStatus = buildEmptyStatusAmountMap();
-  const amountByStatus = buildEmptyStatusAmountMap();
+  const countByStatus = buildEmptyStatusMap();
+  const amountByStatus = buildEmptyStatusMap();
+  let totalAmount = 0;
 
   for (const payment of payments) {
-    if (countByStatus[payment.status] === undefined) {
-      countByStatus[payment.status] = 0;
-      amountByStatus[payment.status] = 0;
-    }
-
     countByStatus[payment.status] += 1;
     amountByStatus[payment.status] += payment.amount;
+    totalAmount += payment.amount;
   }
 
   return {
     totalPayments: payments.length,
-    totalAmount: payments.reduce((total, payment) => total + payment.amount, 0),
+    totalAmount,
     countByStatus,
     amountByStatus,
     generatedAt: new Date().toISOString(),
