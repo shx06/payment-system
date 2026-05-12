@@ -361,6 +361,70 @@ test('simulated gateway mode retries after timeout and succeeds on second attemp
   assert.equal(finalState.body.data.lastError, null);
 });
 
+test('GET /api/reports/payments/summary returns empty aggregates when no payments exist', async () => {
+  const response = await request(app).get('/api/reports/payments/summary');
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(response.body.data.totalPayments, 0);
+  assert.equal(response.body.data.totalAmount, 0);
+  assert.deepEqual(response.body.data.countByStatus, {
+    Pending: 0,
+    Processing: 0,
+    Success: 0,
+    Failed: 0,
+  });
+  assert.deepEqual(response.body.data.amountByStatus, {
+    Pending: 0,
+    Processing: 0,
+    Success: 0,
+    Failed: 0,
+  });
+  assert.equal(typeof response.body.data.generatedAt, 'string');
+});
+
+test('GET /api/reports/payments/summary returns aggregated counts and amounts by status', async () => {
+  const pendingPayment = await request(app)
+    .post('/api/payments')
+    .send({ amount: 75, currency: 'USD' });
+
+  const successPayment = await request(app)
+    .post('/api/payments')
+    .send({ amount: 125.5, currency: 'USD' });
+
+  await request(app)
+    .post(`/api/payments/${successPayment.body.data.id}/process`)
+    .send({ shouldSucceed: true });
+  await waitForStatus(successPayment.body.data.id, 'Success');
+
+  const failedPayment = await request(app)
+    .post('/api/payments')
+    .send({ amount: 50, currency: 'USD' });
+
+  await request(app)
+    .post(`/api/payments/${failedPayment.body.data.id}/callback`)
+    .send({ status: 'Failed', reason: 'Failed by provider callback.' });
+
+  const summaryResponse = await request(app).get('/api/reports/payments/summary');
+
+  assert.equal(summaryResponse.statusCode, 200);
+  assert.equal(summaryResponse.body.success, true);
+  assert.equal(summaryResponse.body.data.totalPayments, 3);
+  assert.equal(summaryResponse.body.data.totalAmount, 250.5);
+  assert.deepEqual(summaryResponse.body.data.countByStatus, {
+    Pending: 1,
+    Processing: 0,
+    Success: 1,
+    Failed: 1,
+  });
+  assert.deepEqual(summaryResponse.body.data.amountByStatus, {
+    Pending: pendingPayment.body.data.amount,
+    Processing: 0,
+    Success: successPayment.body.data.amount,
+    Failed: failedPayment.body.data.amount,
+  });
+});
+
 test('callback can finalize a processing payment early', { concurrency: false }, async () => {
   const created = await request(app)
     .post('/api/payments')
